@@ -29,6 +29,7 @@ Use the guide for your GPU and operating system. Model and feature support can d
 | More than one GPU | [Multiple GPUs](MULTI_GPU.md) |
 | Two cards: one reads the prompt, one makes the answer (opt-in) | [Split serving](SPLIT_SERVE.md) |
 | Older GPUs | [Experimental hardware](OLDER_GPUS.md) |
+| Old desktop + Quadro P2200 (5 GB) with Gemma 4 26B-A4B | [P2200 + Gemma 4 (日本語)](P2200_GEMMA4.md) |
 
 ## Developers and contributors
 

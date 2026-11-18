@@ -1,3 +1,10 @@
+> [!NOTE]
+> **Fork of [Niko1221/Strata](https://github.com/Niko1221/Strata) (MIT).** This copy is built for one specific weak machine: an
+> **Intel Core i5-3470 (4 cores, no AVX2), 16 GB RAM and a 5 GB NVIDIA Quadro P2200 (sm_61)**, serving **Gemma 4 26B-A4B** as an
+> OpenAI-compatible server on `http://localhost:8088`. Everything below is the upstream Strata documentation; the fork's own
+> environment, build flags and startup steps are in [docs/P2200_GEMMA4.md](docs/P2200_GEMMA4.md) and in [This fork](#this-fork) below.
+> Upstream downloads, sponsorships and support channels belong to [Niko1221/Strata](https://github.com/Niko1221/Strata).
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="apps/host/public/brand/strata-lockup-dark.svg">
@@ -9,6 +16,7 @@
 <p align="center">Chat, code and work with images, locally.</p>
 
 <p align="center">
+  <a href="#this-fork"><b>This fork</b></a> ·
   <a href="#models">Models</a> · <a href="#install"><b>Install</b></a> ·
   <a href="#hardware">Hardware</a> · <a href="#tools">Tools</a> ·
   <a href="#help">Help</a> · <a href="#support-strata">Support</a>
@@ -24,6 +32,50 @@
 <p align="center"><sub><b>English</b> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.de.md">Deutsch</a> · <a href="README.fr.md">Français</a> · <a href="README.es.md">Español</a> · <a href="README.pt-BR.md">Português</a> · <a href="README.pl.md">Polski</a></sub></p>
 
 **Free, open source, and yours to run.** Use Strata on your desktop or with your favorite coding tools. No account needed.
+
+<a id="this-fork"></a>
+
+## This fork: Gemma 4 26B-A4B on a Quadro P2200
+
+Full guide (Japanese, with build flags and troubleshooting): **[docs/P2200_GEMMA4.md](docs/P2200_GEMMA4.md)**.
+
+### What this machine is
+
+| | |
+| --- | --- |
+| CPU | Intel Core i5-3470 @ 3.20 GHz · 4 cores / 4 threads · **AVX yes, AVX2 no** |
+| RAM | 16 GB (15.06 GiB) + 4 GB swap, about 3 GB of it in use |
+| Disk | 440 GB SATA SSD, 336 GB free |
+| GPU | **NVIDIA Quadro P2200** (GP106GL) · 5,120 MiB · sm_61 · 75 W · running at **PCIe Gen1 x16** |
+| OS | Ubuntu 24.04.4 LTS · CUDA 12.2 · gcc-12 · CMake 3.28.3 · Python 3.12 · Strata 0.1.59.1 |
+
+The model is 14.4 GB and the vision projector 0.81 GB, so **it does not fit in 5 GB of VRAM or in RAM**. It runs because the MoE experts stay on the CPU (`strata --native`, added by `tools/gemma4_server.py`) while the attention layers sit in VRAM (about 4.7 GB used).
+
+Measured on this box (2026-11-18, `http://localhost:8088`): **decode 8.3-8.5 tokens/s**, a first read of 1,898 input tokens **87 s (about 22 tok/s)**, a follow-up over an already-read 32,280-token prefix **0.35 s** (KV cache reuse), and a cold 32,000-token prompt **about 77 minutes**. Slow, but local and it works.
+
+### Run it
+
+```bash
+cmake -S . -B build-local-p2200 -DCMAKE_BUILD_TYPE=Release \
+  -DSTRATA_ENABLE_CUDA=ON -DSTRATA_EXPERIMENTAL_SM60=ON -DCMAKE_CUDA_ARCHITECTURES=61 \
+  -DSTRATA_NATIVE_EXPERTS=ON -DSTRATA_Q6K_EXPERTS=ON -DSTRATA_MMQ_KQUANTS=ON \
+  -DSTRATA_GEMMA4_GGML_DIR=$HOME/llama_cpp -DSTRATA_BUILD_TESTS=OFF
+cmake --build build-local-p2200 -j4
+
+./gemma4-server.sh        # MODEL=... STRATA=... PORT=... MAX_CONTEXT=... are optional overrides
+```
+
+Chat page `http://localhost:8088/`, live monitor `http://localhost:8088/monitor`, JSON status `/status`, OpenAI API `/v1/chat/completions` (streaming and `tools`) and `/v1/models` → `gemma-4-26b-a4b`. Pictures work when `mmproj-gemma-4-26B*.gguf` sits next to the model. **There is no authentication**, so keep it on a trusted network (`--host 127.0.0.1` to keep it local only). Requests are served one at a time.
+
+VS Code (`chatLanguageModels.json`) on this machine starts with `"maxInputTokens": 12288` rather than the model's full 131,072, because cold long prompts are what hurts here:
+
+```jsonc
+{ "name": "STRATA-Quadro", "vendor": "customendpoint", "apiKey": "Strata", "apiType": "chat-completions",
+  "models": [{ "id": "gemma-4-26b-a4b", "name": "(Quadro) Gemma 4 26B-A4B", "url": "http://localhost:8088/v1",
+              "toolCalling": true, "vision": true, "maxInputTokens": 12288, "maxOutputTokens": 8192 }] }
+```
+
+Fork-only files: `tools/gemma4_server.py` (the server, not in upstream), `gemma4-server.sh` (this launcher), `docs/P2200_GEMMA4.md`. Model weights are never committed.
 
 ## Models
 

@@ -9806,6 +9806,72 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_G4_DEBUG",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "src/gemma4/g4_engine.cpp",
+     "line": 321,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "3f8d3b4fd0",
+   "first_date": "2026-11-18",
+   "since": null,
+   "last_commit": "3f8d3b4fd0",
+   "last_date": "2026-11-18",
+   "status": "research",
+   "owner": "gemma4",
+   "note": "[auto] debug-only probe dump: when set, the Gemma 4 engine names each intermediate tensor and prints their sums to compare with llama.cpp. [src/gemma4/g4_engine.cpp:321]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_G4_SWA_CELLS",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "src/gemma4/g4_engine.cpp",
+     "line": 150,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "3f8d3b4fd0",
+   "first_date": "2026-11-18",
+   "since": null,
+   "last_commit": "3f8d3b4fd0",
+   "last_date": "2026-11-18",
+   "status": "research",
+   "owner": "gemma4",
+   "note": "[auto] overrides the sliding-window KV ring size for the Gemma 4 engine (0 or the context = no ring, used for testing). [src/gemma4/g4_engine.cpp:150]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_GDN_CHUNK",
    "backends": [
     "cuda",

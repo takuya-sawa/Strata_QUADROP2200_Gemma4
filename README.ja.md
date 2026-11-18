@@ -1,3 +1,9 @@
+> **このリポジトリは [Niko1221/Strata](https://github.com/Niko1221/Strata) (MIT) のフォークです。** 次の古いデスクトップ 1 台向けに構築したコピーです:
+> **Intel Core i5-3470 (4 コア・AVX2 なし)・メモリ 16 GB・VRAM 5 GB の NVIDIA Quadro P2200 (sm_61)** に、**Gemma 4 26B-A4B** を
+> OpenAI 互換サーバー `http://localhost:8088` として動かします。以下は Strata 本家のドキュメントです。このフォークの実環境・ビルドフラット・
+> 起動手順は [docs/P2200_GEMMA4.md](docs/P2200_GEMMA4.md) と、下の [このフォーク](#このフォーク) の節に書いています。
+> ダウンロード・スポンサー・サポート窓口は [Niko1221/Strata](https://github.com/Niko1221/Strata) のものです。
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="apps/host/public/brand/strata-lockup-dark.svg">
@@ -9,6 +15,7 @@
 <p align="center">チャット、コーディング、画像の処理を、すべてローカルで。</p>
 
 <p align="center">
+  <a href="#このフォーク"><b>このフォーク</b></a> ·
   <a href="#モデル">モデル</a> · <a href="#インストール"><b>インストール</b></a> ·
   <a href="#ハードウェア">ハードウェア</a> · <a href="#ツール">ツール</a> ·
   <a href="#ヘルプ">ヘルプ</a> · <a href="#strata-を支援する">支援</a>
@@ -24,6 +31,50 @@
 <p align="center"><sub><a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <b>日本語</b> · <a href="README.de.md">Deutsch</a> · <a href="README.fr.md">Français</a> · <a href="README.es.md">Español</a> · <a href="README.pt-BR.md">Português</a> · <a href="README.pl.md">Polski</a></sub></p>
 
 **無料でオープンソース。自分の環境で動かせます。** デスクトップで、またはお好みのコーディングツールと一緒に Strata を使えます。アカウントは不要です。
+
+<a id="このフォーク"></a>
+
+## このフォーク: Quadro P2200 で Gemma 4 26B-A4B
+
+詳しく (日本語・ビルドフラット・つまずいたとき) は **[docs/P2200_GEMMA4.md](docs/P2200_GEMMA4.md)**。
+
+### 動作環境 (どんな貧弱なマシンか)
+
+| | |
+| --- | --- |
+| CPU | Intel Core i5-3470 @ 3.20 GHz・4 コア / 4 スレッド・**AVX あり / AVX2 なし** |
+| メモリ | 16 GB (15.06 GiB) + スワップ 4 GB (常時約 3 GB 使用中) |
+| ディスク | SATA SSD 440 GB・空き 336 GB |
+| GPU | **NVIDIA Quadro P2200** (GP106GL)・5,120 MiB・sm_61・75 W・**実リンク PCIe Gen1 x16** |
+| OS ほか | Ubuntu 24.04.4 LTS・CUDA 12.2・gcc-12・CMake 3.28.3・Python 3.12・Strata 0.1.59.1 |
+
+モデル本体 14.4 GB・画像用 projector 0.81 GB で、**VRAM 5 GB にもメモリ 16 GB にも入りきりません。** MoE のエキスパートを CPU 側 (ネイティブ量子化) に置き、attention だけを VRAM (約 4.7 GB 使用) に載せることで動きます。
+
+このマシンでの実測 (2026-11-18、`http://localhost:8088`): 出力 **8.3〜8.5 token/s**、入力 1,898 token の初回読み **87 秒 (約 22 token/s)**、すでに読んだ 32,280 token の続きのリクエスト **0.35 秒** (KV キャッシュ再利用)、冷えた状態での 32,000 token 入力 **約 77 分**。遅いですが、ローカルで完結して動きます。
+
+### 起動手順
+
+```bash
+cmake -S . -B build-local-p2200 -DCMAKE_BUILD_TYPE=Release \
+  -DSTRATA_ENABLE_CUDA=ON -DSTRATA_EXPERIMENTAL_SM60=ON -DCMAKE_CUDA_ARCHITECTURES=61 \
+  -DSTRATA_NATIVE_EXPERTS=ON -DSTRATA_Q6K_EXPERTS=ON -DSTRATA_MMQ_KQUANTS=ON \
+  -DSTRATA_GEMMA4_GGML_DIR=$HOME/llama_cpp -DSTRATA_BUILD_TESTS=OFF
+cmake --build build-local-p2200 -j4
+
+./gemma4-server.sh        # MODEL= / STRATA= / PORT= / MAX_CONTEXT= で変更できます
+```
+
+チャット `http://localhost:8088/`・ライブ監視 `/monitor`・JSON 状態 `/status`・OpenAI 互換 API `/v1/chat/completions` (stream・`tools` 対応)・`/v1/models` → `gemma-4-26b-a4b`。画像は `mmproj-gemma-4-26B*.gguf` がモデルと同じ場所にあるとき使えます。**認証はありません** (信頼できる LAN のみ。ローカルだけなら `--host 127.0.0.1`)。リクエストは 1 件ずつ処理されます。
+
+VS Code では `chatLanguageModels.json` に次のように追加します。このマシンでは `maxInputTokens` をモデル満員の 131,072 ではなく **12288 程度**から始めるのが実用的です (上の実測の通り長いプロンプトの初回読みが高い)。
+
+```jsonc
+{ "name": "STRATA-Quadro", "vendor": "customendpoint", "apiKey": "Strata", "apiType": "chat-completions",
+  "models": [{ "id": "gemma-4-26b-a4b", "name": "(Quadro) Gemma 4 26B-A4B", "url": "http://localhost:8088/v1",
+              "toolCalling": true, "vision": true, "maxInputTokens": 12288, "maxOutputTokens": 8192 }] }
+```
+
+このフォークにしかないもの: `tools/gemma4_server.py` (サーバー。本家にはありません)、`gemma4-server.sh` (この起動スクリプト)、`docs/P2200_GEMMA4.md`。モデルの重みはコミットしません。
 
 ## モデル
 
