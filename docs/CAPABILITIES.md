@@ -24,11 +24,11 @@ Model guide: [MODELS.md](MODELS.md#deepseek-v41-flash).
 
 | Hardware | Packaged | Supported | Limits | Measured |
 | --- | --- | --- | --- | --- |
-| NVIDIA on Windows | `cuda-cuda13` | supported: RTX 30, 40 and 50 | The package carries RTX 40 code (sm_89); we have not run an RTX 40 card. | [README](../README.md) speed table (RTX 5070, RTX 3060); [DEEPSEEK41.md](DEEPSEEK41.md) |
+| NVIDIA on Windows | `cuda-cuda13` | supported: RTX 30, 40 and 50 | The package carries RTX 40 code (sm_89); we have not run an RTX 40 card. | [DEEPSEEK41.md](DEEPSEEK41.md) (RTX 5070, RTX 3060) |
 | NVIDIA on Linux | `cuda-cuda13` | supported: RTX 30, 40 and 50 | The package carries RTX 40 code (sm_89); we have not run an RTX 40 card. | [DEEPSEEK41.md](DEEPSEEK41.md) |
 | NVIDIA DGX Spark | `cuda-cuda13` | supported: GB10 | - | [DGX_SPARK_LINUX.md](DGX_SPARK_LINUX.md) (2.00 bpw) |
 | AMD on Windows | `hip-rdna3` | supported: Ryzen AI Max / Strix Halo, gfx1151 | The package is built for gfx1151. Other AMD cards on Windows: nothing is claimed. | [STRIX_HALO.md](STRIX_HALO.md#deepseek-v41-flash) |
-| AMD on Linux | `hip-rx9070` | supported: Radeon AI PRO R9700 | The RX 9070 (gfx1200) uses the same package and is untested. Ryzen AI Max (Strix Halo) on Linux has no DeepSeek package. | [README](../README.md) speed table (1 and 4 cards); [AMD_HIP.md](AMD_HIP.md) |
+| AMD on Linux | `hip-rx9070` | supported: Radeon AI PRO R9700 | The RX 9070 (gfx1200) uses the same package and is untested. Ryzen AI Max (Strix Halo) on Linux has no DeepSeek package. | [AMD_HIP.md](AMD_HIP.md) (1 and 4 cards) |
 | Intel Arc on Linux | none | does not run | No package. DeepSeek does not run on Intel ([INTEL.md](INTEL.md)). | - |
 | Apple silicon | `metal` | supported: 64 GB or more, macOS 15 or newer | Text; pictures only with an engine that carries the Metal picture reader (marker STRATA_DS4_METAL_VISION_V1, present in the 0.1.58 package). Nothing under 128 GB was run. | [DEEPSEEK_MAC.md](DEEPSEEK_MAC.md) (M5 Max, 128 GB) |
 
@@ -40,7 +40,7 @@ Model guide: [MODELS.md](MODELS.md#qwen38-flash-next).
 
 | Hardware | Packaged | Supported | Limits | Measured |
 | --- | --- | --- | --- | --- |
-| NVIDIA on Windows | `cuda-cuda12`, `cuda-cuda13` | supported | - | [README](../README.md) speed table; [DETAILS.md](DETAILS.md) |
+| NVIDIA on Windows | `cuda-cuda12`, `cuda-cuda13` | supported | - | [DETAILS.md](DETAILS.md#speed-measured) |
 | NVIDIA on Linux | `cuda-cuda12`, `cuda-cuda13` | supported | - | [DETAILS.md](DETAILS.md) |
 | NVIDIA DGX Spark | `cuda-cuda13` | supported: GB10 | - | [DGX_SPARK_LINUX.md](DGX_SPARK_LINUX.md) |
 | AMD on Windows | `hip-rdna2`, `hip-rdna3`, `hip-rx9070` | supported: RX 6000, 7000 and 9000, Ryzen AI Max | - | [STRIX_HALO_WINDOWS.md](STRIX_HALO_WINDOWS.md); [AMD_HIP.md](AMD_HIP.md) |

@@ -1,3 +1,10 @@
+> [!NOTE]
+> **这个仓库是 [Niko1221/Strata](https://github.com/Niko1221/Strata) (MIT) 的分支 (fork)，不是本项目本身。** 它是在一台旧的台式机上构建的 Strata:
+> **Intel Core i5-3470 (4 核、无 AVX2) · 16 GB 内存 · NVIDIA Quadro P2200 5 GB** (sm_61、实际链路 PCIe Gen1 x16), 把 **Gemma 4 26B-A4B** 作为
+> OpenAI 兼容服务器运行在 `http://localhost:8088`。本家的模型、安装程序、硬件指南和支持都在 **[Niko1221/Strata](https://github.com/Niko1221/Strata)**。
+> 完整指南 (日语): **[docs/P2200_GEMMA4.md](docs/P2200_GEMMA4.md)**。本页面只描述这个分支的机器; 本家指南在这个代码树里也保留着:
+> [docs/README.md](docs/README.md), [docs/MODELS.md](docs/MODELS.md), [docs/CAPABILITIES.md](docs/CAPABILITIES.md), [docs/INSTALL.md](docs/INSTALL.md), [docs/OLDER_GPUS.md](docs/OLDER_GPUS.md).
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="apps/host/public/brand/strata-lockup-dark.svg">
@@ -5,202 +12,142 @@
   </picture>
 </p>
 
-<h3 align="center">在你自己的电脑上运行强大的 AI。</h3>
-<p align="center">本地聊天、写代码、处理图片。</p>
+<h3 align="center">分支的构成: 在 5 GB 的 Quadro P2200 上运行 Gemma 4 26B-A4B</h3>
+<p align="center">一台很弱的电脑, 一个本地模型服务器。</p>
 
 <p align="center">
-  <a href="#模型">模型</a> · <a href="#安装"><b>安装</b></a> ·
-  <a href="#硬件">硬件</a> · <a href="#工具">工具</a> ·
-  <a href="#帮助">帮助</a> · <a href="#支持-strata">支持</a>
+  <a href="#this-machine"><b>这台机器</b></a> ·
+  <a href="#measured-speed"><b>实测速度</b></a> ·
+  <a href="#run-it"><b>启动</b></a> ·
+  <a href="#vs-code"><b>VS Code</b></a> ·
+  <a href="#fork-only-files"><b>分支独有的文件</b></a> ·
+  <a href="#upstream-strata"><b>本家 Strata</b></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Niko1221/Strata/releases/latest"><img src="https://img.shields.io/github/v/release/Niko1221/Strata?label=download&color=0ab887" alt="下载 Strata"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/Niko1221/Strata" alt="MIT 许可证"></a>
-  <a href="https://github.com/sponsors/Niko1221"><img src="https://img.shields.io/badge/Sponsor-EA4AAA?logo=githubsponsors&logoColor=fff" alt="在 GitHub Sponsors 上支持 Strata"></a>
-  <a href="https://buymeacoffee.com/strataengine"><img src="https://img.shields.io/badge/Buy_me_a_coffee-FFDD00?logo=buymeacoffee&logoColor=000" alt="在 Buy Me a Coffee 上支持 Strata"></a>
+  <a href="https://github.com/takuya-sawa/Strata_QUADROP2200_Gemma4"><img src="https://img.shields.io/badge/fork-Niko1221%2FStrata-0ab887" alt="forked from Niko1221/Strata"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Niko1221/Strata" alt="MIT license"></a>
+  <a href="https://github.com/Niko1221/Strata/releases/latest"><img src="https://img.shields.io/github/v/release/Niko1221/Strata?label=upstream+release&color=0ab887" alt="upstream Strata release"></a>
 </p>
 
 <p align="center"><sub><a href="README.md">English</a> · <b>简体中文</b> · <a href="README.ja.md">日本語</a> · <a href="README.de.md">Deutsch</a> · <a href="README.fr.md">Français</a> · <a href="README.es.md">Español</a> · <a href="README.pt-BR.md">Português</a> · <a href="README.pl.md">Polski</a></sub></p>
 
-**免费、开源，由你自己运行。** 在桌面上使用 Strata，或搭配你喜欢的编程工具。无需账号。
+<a id="this-machine"></a>
 
-## 模型
+## 这台机器 (有多弱)
 
-我们**首先推荐 ISTA-DASLab**，其次是 **Unsloth** 和其他提供方，前提是有内存放得下的兼容模型。
-
-<details>
-<summary><img src="docs/media/models/qwen.svg" width="22" alt="" align="middle"> &nbsp;<b>Qwen3.8-Flash-Next</b></summary>
-
-| 提供方 | 可选项 |
+| 部件 | 说明 |
 | --- | --- |
-| **ISTA-DASLab · 推荐** | Q2\_0, IQ2\_XS, IQ3\_XXS, IQ3\_S。[Coder：IQ1\_M](docs/MODELS.md#coder)，适合写代码。 |
-| **Unsloth** | UD-IQ4\_XS, UD-Q4\_K\_XL, UD-Q5\_K\_XL, UD-Q6\_K\_XL, Q8\_0 |
-| **Gyro · agentionai** | [Gyro-S, Gyro-M](https://huggingface.co/agentionai/Qwen3.8-Flash-Next-Gyro-GGUF)。占用内存更少，但速度更慢。 |
-| **其他选项** | [Swift 1.5](docs/MODELS.md#swift-15), [NVFP4](docs/NVFP4.md), [OrcaRouter](docs/ORCA.md) |
+| CPU | Intel Core i5-3470 @ 3.20 GHz · 4 核心 / 4 线程 (Ivy Bridge) · **有 AVX、无 AVX2** |
+| 内存 | 16 GB (15.06 GiB) + 4 GB swap, 常驻约 3 GB 在使用 |
+| 磁盘 | 440 GB SATA SSD (TOSHIBA Q300), 空闲 336 GB |
+| GPU | **NVIDIA Quadro P2200** (GP106GL) · 5,120 MiB VRAM · compute capability 6.1 (sm_61) · 75 W · **链路实际运行于 PCIe Gen1 x16** |
+| 操作系统 | Ubuntu 24.04.4 LTS · NVIDIA driver 580.178.04 · CUDA 12.2 · gcc-12 · CMake 3.28.3 · Python 3.12.3 |
+| 引擎 | Strata 0.1.59.1 在本机构建 (`build-local-p2200/strata`) |
+| 权重 | `gemma-4-26B_q4_0-it.gguf` 14.4 GB + `mmproj-gemma-4-26B-A4B-it-Q8_0.gguf` 0.81 GB 位于 `~/models/` (从不提交) |
 
-[比较大小、内存需求和兼容性](docs/MODELS.md)。
+模型 **既放不进 5 GB 显存, 也放不进 16 GB 内存**。它能运行, 是因为 MoE 的专家留在 CPU 上 (原生 / IQ 量化), 只有 attention 部分放在显存里 (约 4.7 GB)。`tools/gemma4_server.py` 用 `--native` 启动 `strata`; `--no-gpu` 会更慢。实际使用: GPU **4,696 / 5,120 MiB**、34 °C、可用内存 11,712 MiB。
 
-</details>
+<a id="measured-speed"></a>
 
-<details>
-<summary><img src="docs/media/models/qwen.svg" width="22" alt="" align="middle"> &nbsp;<b>Qwen3.6-35B-A3B</b></summary>
+## 实测速度 (这台机器)
 
-**Unsloth:** UD-Q4_K_XL, UD-Q6_K_XL, Q8_0。这些是目前文档中收录的该模型的版本。
+向 `http://localhost:8088` 实际发送请求测出的数值 (2026-11-18、Strata 0.1.59.1)。
 
-[模型指南和兼容性](docs/QWEN36.md)。
+| 情况 | 实测 |
+| --- | --- |
+| 输出 (decode) | **8.3-8.5 tokens/s** |
+| 首次读取 1,898 个输入 token (prefill) | **87.1 s (约 22 token/s)** |
+| 41 个输入 token 的短请求 | 提示 3.3 秒, 输出 8.5 token/s |
+| 再次读取已读过的 32,280 token 前缀 (KV 缓存复用) | **0.34-0.37 s** |
+| 长对话中的输出 | **3.1 tokens/s** |
+| 首次读取 32,000 个输入 token (无缓存) | **约 4,640 秒 (77 分)** |
 
-</details>
+所以这个分支不是让 Strata 变快, 而是让它在**本家指南视为不受支持的旧卡**上运行 (见 [docs/OLDER_GPUS.md](docs/OLDER_GPUS.md))。本家 RTX 5070 / RTX 3060 的速度在 [docs/DEEPSEEK41.md](docs/DEEPSEEK41.md) 与 [docs/CAPABILITIES.md](docs/CAPABILITIES.md), 相差一个数量级。
 
-<details>
-<summary><img src="docs/media/models/deepseek.svg" width="22" alt="" align="middle"> &nbsp;<b>DeepSeekV4.1-Flash-1017</b></summary>
+<a id="run-it"></a>
 
-可在**桌面应用**和**终端**中使用。内存放不下的部分会从 SSD 读取，所以需要大量空闲磁盘空间。
+## 启动
 
-| 版本（ISTA-DAS） | 下载大小 | 所需空闲磁盘 |
-| --- | ---: | ---: |
-| 1.75 bpw | 239 GB | 约245 GB |
-| 2.00 bpw | 257 GB | 约265 GB |
-| 2.25 bpw | 274 GB | 约280 GB |
+```bash
+# 只做一次: 为 sm_61 构建带 CUDA 的 llama.cpp
+git clone https://github.com/ggml-org/llama.cpp ~/llama_cpp
+cmake -S ~/llama_cpp -B ~/llama_cpp/build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=61
+cmake --build ~/llama_cpp/build -j4
 
-支持 NVIDIA RTX 30、40 和 50 系列（Windows 和 Linux）、AMD Radeon AI PRO R9700（Linux）、AMD Ryzen AI Max — Strix Halo（Windows），以及内存 64 GB 或以上的 Apple 芯片 Mac（[Mac](docs/DEEPSEEK_MAC.md)）。安装程序会下载模型文件和 DeepSeek 引擎，然后启动模型。
+# 把这个仓库为 P2200 构建
+cmake -S . -B build-local-p2200 -DCMAKE_BUILD_TYPE=Release \
+  -DSTRATA_ENABLE_CUDA=ON -DSTRATA_EXPERIMENTAL_SM60=ON -DCMAKE_CUDA_ARCHITECTURES=61 \
+  -DSTRATA_NATIVE_EXPERTS=ON -DSTRATA_Q6K_EXPERTS=ON -DSTRATA_MMQ_KQUANTS=ON \
+  -DSTRATA_GEMMA4_GGML_DIR=$HOME/llama_cpp -DSTRATA_BUILD_TESTS=OFF
+cmake --build build-local-p2200 -j4
 
-```sh
-strata launch --family deepseek41 --model ist-das-2.00bpw --plan
+./gemma4-server.sh        # MODEL= STRATA= PORT= MAX_CONTEXT= 可以覆盖
 ```
 
-以下为 Strata 0.2.5 上 2.00 bpw 版本的实测结果。“输出”是回答的速度，“提示词”是 Strata 读取你输入内容的速度。
+| 地址 | 内容 |
+| --- | --- |
+| `http://localhost:8088/` | 聊天页面 |
+| `http://localhost:8088/monitor` | 显示 GPU、正在处理的请求、速度和历史的实时页面 (`/status` 是同样内容的 JSON) |
+| `http://localhost:8088/v1/chat/completions` | OpenAI 兼容 API (`stream`、`tools`); `/v1/models` 返回 `gemma-4-26b-a4b` |
 
-| 硬件 | 输出 | 提示词 |
-| --- | ---: | ---: |
-| RTX 5070 12 GB, 64 GB 内存 | 4 到 6 tokens/s | 约 110 tokens/s（4K） |
-| RTX 3060 12 GB, 46 GB 内存 | 9 到 11 tokens/s | 约 155 tokens/s（4K） |
-| 1x Radeon AI PRO R9700, 251 GB 内存 | 21 到 25 tokens/s | 320 到 360 tokens/s (8K) |
-| 4x Radeon AI PRO R9700 | 74 到 77 tokens/s | 400 到 450 tokens/s (8K) |
+**没有身份验证**, 服务器监听 `0.0.0.0`, 所以只在可信网络中使用; 只想本机可用时给 `python3 tools/gemma4_server.py` 加 `--host 127.0.0.1`。请求一次只处理一个 (只有一个 KV 缓存)。图片只在模型旁边有 `mmproj-gemma-4-26B*.gguf` 时可用。
 
-[内存、磁盘和详细信息](docs/DEEPSEEK41.md) · [发行说明](https://github.com/Niko1221/Strata/releases)
+<a id="vs-code"></a>
 
-</details>
+## VS Code
 
-<a id="the-other-sizes"></a>
+这台机器实际使用的 `chatLanguageModels.json` 条目如下 (设置: **Language Models: Chat Language Models** -> *Edit in Settings JSON*)。`maxInputTokens` 实际设成 **122880**, 但冷启动读 32k 要一个多小时, **建议从 12288 开始**; `maxOutputTokens: 8192` 时一个回答可能等 15 分钟以上。其他机器以 `customendpoint` 加在同一文件里 (`apiType: messages`, 地址是 `http://<那台机器的 IP>:<端口>/v1`)。API 兼容 OpenAI, 因此 Claude Code、Codex CLI、OpenCode 等也能用 (本家: [docs/TERMINAL_LAUNCH.md](docs/TERMINAL_LAUNCH.md)、[docs/AI_SETUP.md](docs/AI_SETUP.md))。
 
-不确定哪个放得下？[为你的电脑选择模型](docs/MODELS.md#pick-by-memory)。
+```jsonc
+{
+  "name": "STRATA-Quadro",
+  "vendor": "customendpoint",
+  "apiKey": "Strata",
+  "apiType": "chat-completions",
+  "models": [
+    {
+      "id": "gemma-4-26b-a4b",
+      "name": "(Quadro) Gemma 4 26B-A4B",
+      "url": "http://localhost:8088/v1",
+      "toolCalling": true,
+      "vision": true,
+      "maxInputTokens": 122880,
+      "maxOutputTokens": 8192
+    }
+  ]
+}
+```
 
-## 安装
+<a id="fork-only-files"></a>
 
-<a id="option-a-the-strata-app"></a>
+## 这个分支独有的文件
 
-### 桌面应用
+[`gemma4-server.sh`](gemma4-server.sh) - 这台机器使用的启动脚本 (仓库根目录)。
+[`tools/gemma4_server.py`](tools/gemma4_server.py) - Gemma 4 的 HTTP 服务器: OpenAI API、监视页面、分词器、聊天模板。本家没有。
+[`docs/P2200_GEMMA4.md`](docs/P2200_GEMMA4.md) - 这台机器的日语指南: 环境、编译参数、启动、故障排查。
+`src/gemma4/` 与 `include/strata/gemma4/` 里的 Gemma 4 代码, `tools/gemma4_*` 辅助脚本和 `data/dsv41/`。
+`build-local-p2200/` (已 gitignore) 和 `~/models/` 里约 15 GB 的权重 (`/models/` 已 gitignore) - 从不提交。
 
-**[下载适用于 Windows、Linux 或 Mac 的 Strata →](https://github.com/Niko1221/Strata/releases/latest)**
+<a id="upstream-strata"></a>
 
-安装应用，选择模型，就可以开始聊天。每个系统只有一个安装程序。首次启动时，应用会下载适合你显卡的引擎。[安装程序帮助](docs/INSTALL.md#the-app)。
+## 本家 Strata (应用、Terminal、其他模型)
 
-<sub>文件: `Strata-0.2.13-windows-x64-setup.exe` · `Strata-0.2.13-linux-x86_64.AppImage` · `Strata-0.2.13-macos-arm64.dmg`</sub>
+本家的代码、文档和测试仍在这个代码树里。Strata 桌面应用、Terminal 和其他模型家族 (DeepSeek V4.1-Flash、Qwen3.8-Flash-Next、Qwen3.6-35B-A3B) 由本家发布, 不是这个分支。
 
-<p align="center">
-  <img src="docs/media/app-chat.png" width="900" alt="Strata 桌面应用，聊天和实时代码预览并排显示">
-  <br><sub>聊天、文件和实时预览都在一个窗口里。</sub>
-</p>
+- 指南: [docs/README.md](docs/README.md) · [docs/MODELS.md](docs/MODELS.md) · [docs/CAPABILITIES.md](docs/CAPABILITIES.md) · [docs/INSTALL.md](docs/INSTALL.md) · [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) · [docs/OLDER_GPUS.md](docs/OLDER_GPUS.md)
+- 本家 Terminal 的一行安装命令 (装的是本家发布版, 不是这个分支的构建):
 
-<a id="option-b-the-terminal-one-line"></a>
-
-### 终端应用
-
-更喜欢终端？安装 Strata，然后运行 **`strata launch`**。
-
-<details open>
-<summary><b>安装命令</b></summary>
-
-**Linux / Mac**
-
-```sh
+```bash
 curl -fsSL --connect-timeout 15 --max-time 120 https://github.com/Niko1221/Strata/releases/latest/download/install.sh -o install.sh && sh install.sh
 ```
-
-**Windows PowerShell**
 
 ```powershell
 irm -TimeoutSec 120 https://github.com/Niko1221/Strata/releases/latest/download/install.ps1 | iex
 ```
 
-在 Windows 上，安装后请打开一个新的终端。然后运行：
+<sub>本家安装文件: `Strata-0.2.13-windows-x64-setup.exe` · `Strata-0.2.13-linux-x86_64.AppImage` · `Strata-0.2.13-macos-arm64.dmg` ([releases/latest](https://github.com/Niko1221/Strata/releases/latest))</sub>
 
-```sh
-strata launch
-```
+给**本家作者**的支持与联系方式在 [Niko1221/Strata](https://github.com/Niko1221/Strata) ([GitHub Sponsors](https://github.com/sponsors/Niko1221)、[Buy Me a Coffee](https://buymeacoffee.com/strataengine)); 这个分支不接受支持。隐私: [docs/SAFETY.md](docs/SAFETY.md)。
 
-按提示下载并启动模型。[终端指南](docs/TERMINAL_LAUNCH.md)。
-
-</details>
-
-<p align="center">
-  <img src="docs/media/terminal-monitor.png" width="900" alt="Strata 终端应用，显示模型活动、速度、内存和最近的请求">
-  <br><sub>模型运行时，随时查看模型和硬件状态。</sub>
-</p>
-
-<a id="build-from-source"></a>
-
-[从源码构建](docs/SOURCE_INSTALL.md) · [Docker](docs/DOCKER.md) · [完整安装指南](docs/INSTALL.md)
-
-<a id="what-you-need"></a>
-
-## 硬件
-
-| 支持的硬件 | 指南 |
-| --- | --- |
-| **NVIDIA GeForce RTX 20 / 30 / 40 / 50 系列** | [NVIDIA 安装](docs/INSTALL.md#what-you-need) |
-| **AMD Radeon RX 7700 / 7800 / 7900、RX 9060 / 9070、AI PRO R9700** | [AMD 安装](docs/AMD_HIP.md) |
-| **AMD Radeon RX 6800 / 6900 · 实验性** | [RX 6000 安装](docs/AMD_HIP.md#rdna2-gfx1030) |
-| **Intel Arc · Linux** | [Intel 安装](docs/INTEL_ARC.md) |
-| **Apple Silicon · M1 或更新** | [Mac 安装](docs/MAC.md) |
-| **AMD Ryzen AI Max · Strix Halo** | [Strix Halo 安装](docs/STRIX_HALO.md) |
-
-<a id="using-it"></a>
-
-## 工具
-
-**Claude Code · Codex CLI · OpenCode · oh-my-pi · pi.dev · Hermes Agent · OpenClaw**，也可以通过兼容 OpenAI 和 Anthropic 的 API 使用更多工具。
-
-运行 **`strata connect`**，查看你所用工具的设置方法。[连接指南](docs/TERMINAL_LAUNCH.md#connect-your-apps-strata-connect)。
-
-<a id="guides"></a>
-<a id="how-fast-is-it"></a>
-<a id="how-does-it-work"></a>
-<a id="something-went-wrong"></a>
-
-## 帮助
-
-[全部指南](docs) · [故障排查](docs/TROUBLESHOOTING.md) · [报告问题](https://github.com/Niko1221/Strata/issues/new/choose) ·
-[基准测试](docs/COMMUNITY_BENCHMARKS.md) · [工作原理](docs/HOW_IT_WORKS.md) · [参与贡献](CONTRIBUTING.md)
-
-## 支持 Strata
-
-**帮助本地 AI 保持开放。** GitHub 赞助或一杯咖啡，都能帮助我们在更多硬件上开发和测试。
-
-<a href="https://github.com/sponsors/Niko1221"><img src="https://img.shields.io/badge/Sponsor_on_GitHub-EA4AAA?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="GitHub Sponsors：支持 Strata" height="48"></a>
-<a href="https://buymeacoffee.com/strataengine"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee：支持 Strata" height="48"></a>
-
-### 忠实支持者
-
-感谢每一位支持 Strata 的人。
-
-<!-- supporters:start (one line per public supporter, newest last; copy a line and change the GitHub name in all four places) -->
-<a href="https://github.com/ryan4yin"><img src="https://github.com/ryan4yin.png?size=96" width="48" height="48" alt="ryan4yin" title="ryan4yin"></a>
-<a href="https://github.com/themactep"><img src="https://github.com/themactep.png?size=96" width="48" height="48" alt="themactep" title="themactep"></a>
-<a href="https://github.com/macintog"><img src="https://github.com/macintog.png?size=96" width="48" height="48" alt="macintog" title="macintog"></a>
-<a href="https://github.com/bisonbet"><img src="https://github.com/bisonbet.png?size=96" width="48" height="48" alt="bisonbet" title="bisonbet"></a>
-<a href="https://github.com/vizv"><img src="https://github.com/vizv.png?size=96" width="48" height="48" alt="vizv" title="vizv"></a>
-<a href="https://github.com/kod88vn"><img src="https://github.com/kod88vn.png?size=96" width="48" height="48" alt="kod88vn" title="kod88vn"></a>
-<a href="https://github.com/seoulworker"><img src="https://github.com/seoulworker.png?size=96" width="48" height="48" alt="seoulworker" title="seoulworker"></a>
-<a href="https://github.com/jackyini"><img src="https://github.com/jackyini.png?size=96" width="48" height="48" alt="jackyini" title="jackyini"></a>
-<a href="https://github.com/router0mail"><img src="https://github.com/router0mail.png?size=96" width="48" height="48" alt="router0mail" title="router0mail"></a>
-<!-- supporters:end -->
-
-[MIT 许可证](LICENSE) · [致谢和模型许可证](docs/HOW_IT_WORKS.md#credits) · [隐私](docs/SAFETY.md)
-
-<a id="option-c-let-your-ai-set-it-up"></a>
-
-<sub>面向 AI 工具和自动阅读器： <a href="AGENTS.md">技术参考</a> · <a href="docs/AI_SETUP.md">安装说明</a></sub>
-
-**赞助、硬件合作或其他合作：** [niko.veit@outlook.com](mailto:niko.veit@outlook.com).
+本家: [github.com/Niko1221/Strata](https://github.com/Niko1221/Strata) · 这个分支: [github.com/takuya-sawa/Strata_QUADROP2200_Gemma4](https://github.com/takuya-sawa/Strata_QUADROP2200_Gemma4)

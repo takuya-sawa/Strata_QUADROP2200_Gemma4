@@ -1,3 +1,10 @@
+> [!NOTE]
+> **Este repositório é um fork de [Niko1221/Strata](https://github.com/Niko1221/Strata) (MIT), não o projeto original.** É a versão construída para
+> um único desktop antigo: **Intel Core i5-3470 (4 núcleos, sem AVX2) · 16 GB de RAM · NVIDIA Quadro P2200 5 GB** (sm_61, com link PCIe Gen1 x16),
+> que atende **Gemma 4 26B-A4B** como servidor compatível com OpenAI em `http://localhost:8088`. Modelos, instaladores, guias de hardware e o suporte
+> do original estão em **[Niko1221/Strata](https://github.com/Niko1221/Strata)**. Guia completo (japonês): **[docs/P2200_GEMMA4.md](docs/P2200_GEMMA4.md)**.
+> Esta página descreve só a máquina deste fork; os guias do original continuam na árvore: [docs/README.md](docs/README.md), [docs/MODELS.md](docs/MODELS.md), [docs/CAPABILITIES.md](docs/CAPABILITIES.md), [docs/INSTALL.md](docs/INSTALL.md), [docs/OLDER_GPUS.md](docs/OLDER_GPUS.md).
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="apps/host/public/brand/strata-lockup-dark.svg">
@@ -5,202 +12,142 @@
   </picture>
 </p>
 
-<h3 align="center">IA poderosa no seu próprio computador.</h3>
-<p align="center">Converse, programe e trabalhe com imagens, localmente.</p>
+<h3 align="center">Versão deste fork: Gemma 4 26B-A4B em uma Quadro P2200 de 5 GB</h3>
+<p align="center">Um PC fraco, um servidor local de modelo.</p>
 
 <p align="center">
-  <a href="#modelos">Modelos</a> · <a href="#instalação"><b>Instalação</b></a> ·
-  <a href="#hardware">Hardware</a> · <a href="#ferramentas">Ferramentas</a> ·
-  <a href="#ajuda">Ajuda</a> · <a href="#apoie-o-strata">Apoiar</a>
+  <a href="#this-machine"><b>A máquina</b></a> ·
+  <a href="#measured-speed"><b>Velocidade medida</b></a> ·
+  <a href="#run-it"><b>Executar</b></a> ·
+  <a href="#vs-code"><b>VS Code</b></a> ·
+  <a href="#fork-only-files"><b>Só no fork</b></a> ·
+  <a href="#upstream-strata"><b>Strata original</b></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Niko1221/Strata/releases/latest"><img src="https://img.shields.io/github/v/release/Niko1221/Strata?label=download&color=0ab887" alt="Baixar o Strata"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/Niko1221/Strata" alt="Licença MIT"></a>
-  <a href="https://github.com/sponsors/Niko1221"><img src="https://img.shields.io/badge/Sponsor-EA4AAA?logo=githubsponsors&logoColor=fff" alt="Apoie o Strata no GitHub Sponsors"></a>
-  <a href="https://buymeacoffee.com/strataengine"><img src="https://img.shields.io/badge/Buy_me_a_coffee-FFDD00?logo=buymeacoffee&logoColor=000" alt="Apoie o Strata no Buy Me a Coffee"></a>
+  <a href="https://github.com/takuya-sawa/Strata_QUADROP2200_Gemma4"><img src="https://img.shields.io/badge/fork-Niko1221%2FStrata-0ab887" alt="forked from Niko1221/Strata"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Niko1221/Strata" alt="MIT license"></a>
+  <a href="https://github.com/Niko1221/Strata/releases/latest"><img src="https://img.shields.io/github/v/release/Niko1221/Strata?label=upstream+release&color=0ab887" alt="upstream Strata release"></a>
 </p>
 
 <p align="center"><sub><a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.de.md">Deutsch</a> · <a href="README.fr.md">Français</a> · <a href="README.es.md">Español</a> · <b>Português</b> · <a href="README.pl.md">Polski</a></sub></p>
 
-**Gratuito, de código aberto e seu para executar.** Use o Strata no desktop ou com suas ferramentas de programação favoritas. Não precisa de conta.
+<a id="this-machine"></a>
 
-## Modelos
+## A máquina (quão fraca ela é)
 
-Recomendamos **primeiro a ISTA-DASLab**, depois a **Unsloth** e outros provedores, quando um modelo compatível cabe na memória.
-
-<details>
-<summary><img src="docs/media/models/qwen.svg" width="22" alt="" align="middle"> &nbsp;<b>Qwen3.8-Flash-Next</b></summary>
-
-| Provedor | Opções |
+| Componente | Detalhe |
 | --- | --- |
-| **ISTA-DASLab · recomendado** | Q2\_0, IQ2\_XS, IQ3\_XXS, IQ3\_S. [Coder: IQ1\_M](docs/MODELS.md#coder) para programar. |
-| **Unsloth** | UD-IQ4\_XS, UD-Q4\_K\_XL, UD-Q5\_K\_XL, UD-Q6\_K\_XL, Q8\_0 |
-| **Gyro · agentionai** | [Gyro-S, Gyro-M](https://huggingface.co/agentionai/Qwen3.8-Flash-Next-Gyro-GGUF). Usa menos memória, mas é mais lento. |
-| **Outras opções** | [Swift 1.5](docs/MODELS.md#swift-15), [NVFP4](docs/NVFP4.md), [OrcaRouter](docs/ORCA.md) |
+| CPU | Intel Core i5-3470 @ 3.20 GHz · 4 núcleos / 4 threads (Ivy Bridge) · **AVX sim, AVX2 não** |
+| RAM | 16 GB (15.06 GiB) + 4 GB swap, cerca de 3 GB sempre em uso |
+| Disco | 440 GB SATA SSD (TOSHIBA Q300), 336 GB livres |
+| GPU | **NVIDIA Quadro P2200** (GP106GL) · 5,120 MiB VRAM · compute capability 6.1 (sm_61) · 75 W · **o link opera em PCIe Gen1 x16** |
+| Sistema | Ubuntu 24.04.4 LTS · NVIDIA driver 580.178.04 · CUDA 12.2 · gcc-12 · CMake 3.28.3 · Python 3.12.3 |
+| Motor | Strata 0.1.59.1 compilado aqui (`build-local-p2200/strata`) |
+| Pesos | `gemma-4-26B_q4_0-it.gguf` 14.4 GB + `mmproj-gemma-4-26B-A4B-it-Q8_0.gguf` 0.81 GB em `~/models/` (nunca commitado) |
 
-[Compare tamanhos, necessidades de memória e compatibilidade](docs/MODELS.md).
+O modelo **não cabe em 5 GB de VRAM nem em 16 GB de RAM**. Ele roda porque os especialistas MoE ficam na CPU (nativos / quantizados IQ) e apenas as camadas de atenção ficam na VRAM (cerca de 4,7 GB). `tools/gemma4_server.py` inicia o `strata` com `--native`; `--no-gpu` é ainda mais lento. Em uso real: GPU **4.696 / 5.120 MiB** a 34 °C, 11.712 MiB de RAM disponível.
 
-</details>
+<a id="measured-speed"></a>
 
-<details>
-<summary><img src="docs/media/models/qwen.svg" width="22" alt="" align="middle"> &nbsp;<b>Qwen3.6-35B-A3B</b></summary>
+## Velocidade medida (nesta máquina)
 
-**Unsloth:** UD-Q4_K_XL, UD-Q6_K_XL, Q8_0. Esses são os pacotes documentados atualmente para este modelo.
+Medido enviando pedidos reais a `http://localhost:8088` (2026-11-18, Strata 0.1.59.1).
 
-[Guia do modelo e compatibilidade](docs/QWEN36.md).
+| Situação | Medido |
+| --- | --- |
+| Saída (decode) | **8.3-8.5 tokens/s** |
+| Primeira leitura de 1.898 tokens de entrada (prefill) | **87.1 s (cerca de 22 tokens/s)** |
+| Pedido curto, 41 tokens de entrada | 3,3 s de prompt, 8,5 tokens/s |
+| Pedido sobre um prefixo de 32.280 tokens já lido (cache KV) | **0.34-0.37 s** |
+| Saída no meio de uma conversa longa | **3.1 tokens/s** |
+| Primeira leitura de 32.000 tokens de entrada (nada em cache) | **cerca de 4.640 s (77 minutos)** |
 
-</details>
+Este fork não deixa o Strata rápido: faz com que ele rode em hardware que os guias do original tratam como não suportado ([docs/OLDER_GPUS.md](docs/OLDER_GPUS.md)). As velocidades do original em RTX 5070 / RTX 3060 estão em [docs/DEEPSEEK41.md](docs/DEEPSEEK41.md) e [docs/CAPABILITIES.md](docs/CAPABILITIES.md) - uma ordem de magnitude de diferença.
 
-<details>
-<summary><img src="docs/media/models/deepseek.svg" width="22" alt="" align="middle"> &nbsp;<b>DeepSeekV4.1-Flash-1017</b></summary>
+<a id="run-it"></a>
 
-No **aplicativo de desktop** e no **Terminal**. O que não cabe na memória é lido do seu SSD, por isso é preciso muito espaço livre em disco.
+## Executar
 
-| Conjunto (ISTA-DAS) | Download | Espaço livre necessário |
-| --- | ---: | ---: |
-| 1.75 bpw | 239 GB | cerca de 245 GB |
-| 2.00 bpw | 257 GB | cerca de 265 GB |
-| 2.25 bpw | 274 GB | cerca de 280 GB |
+```bash
+# Uma vez: construa o llama.cpp com CUDA para sm_61
+git clone https://github.com/ggml-org/llama.cpp ~/llama_cpp
+cmake -S ~/llama_cpp -B ~/llama_cpp/build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=61
+cmake --build ~/llama_cpp/build -j4
 
-Roda em NVIDIA RTX 30, 40 e 50 (Windows e Linux), AMD Radeon AI PRO R9700 (Linux), AMD Ryzen AI Max — Strix Halo (Windows) e Macs com Apple Silicon e 64 GB ou mais ([Mac](docs/DEEPSEEK_MAC.md)). A instalação baixa os arquivos e o motor do DeepSeek e depois inicia o modelo.
+# Construa este repositório para o P2200
+cmake -S . -B build-local-p2200 -DCMAKE_BUILD_TYPE=Release \
+  -DSTRATA_ENABLE_CUDA=ON -DSTRATA_EXPERIMENTAL_SM60=ON -DCMAKE_CUDA_ARCHITECTURES=61 \
+  -DSTRATA_NATIVE_EXPERTS=ON -DSTRATA_Q6K_EXPERTS=ON -DSTRATA_MMQ_KQUANTS=ON \
+  -DSTRATA_GEMMA4_GGML_DIR=$HOME/llama_cpp -DSTRATA_BUILD_TESTS=OFF
+cmake --build build-local-p2200 -j4
 
-```sh
-strata launch --family deepseek41 --model ist-das-2.00bpw --plan
+./gemma4-server.sh        # MODEL= STRATA= PORT= MAX_CONTEXT= são valores opcionais
 ```
 
-Medido com o conjunto de 2.00 bpw no Strata 0.2.5. “Saída” é a velocidade da resposta; “Prompt” é a rapidez com que o Strata lê o seu texto.
+| Endereço | O que é |
+| --- | --- |
+| `http://localhost:8088/` | Página de chat |
+| `http://localhost:8088/monitor` | Página ao vivo com GPU, pedido em execução, velocidade e histórico (`/status` dá o mesmo em JSON) |
+| `http://localhost:8088/v1/chat/completions` | API compatível com OpenAI (`stream`, `tools`); `/v1/models` responde `gemma-4-26b-a4b` |
 
-| Hardware | Saída | Prompt |
-| --- | ---: | ---: |
-| RTX 5070 12 GB, 64 GB de RAM | 4 a 6 tokens/s | cerca de 110 tokens/s (4K) |
-| RTX 3060 12 GB, 46 GB de RAM | 9 a 11 tokens/s | cerca de 155 tokens/s (4K) |
-| 1x Radeon AI PRO R9700, 251 GB de RAM | 21 a 25 tokens/s | 320 a 360 tokens/s (8K) |
-| 4x Radeon AI PRO R9700 | 74 a 77 tokens/s | 400 a 450 tokens/s (8K) |
+**Não há autenticação** e o servidor escuta em `0.0.0.0`, então use só em uma rede confiável; para um servidor apenas local, execute `python3 tools/gemma4_server.py` com `--host 127.0.0.1`. Os pedidos são atendidos um por vez (um único cache KV). Imagens funcionam quando `mmproj-gemma-4-26B*.gguf` fica ao lado do arquivo do modelo.
 
-[Memória, disco e detalhes](docs/DEEPSEEK41.md) · [Notas da versão](https://github.com/Niko1221/Strata/releases)
+<a id="vs-code"></a>
 
-</details>
+## VS Code
 
-<a id="the-other-sizes"></a>
+Esta é a entrada que esta máquina realmente usa em `chatLanguageModels.json` (Configuração: **Language Models: Chat Language Models** -> *Edit in Settings JSON*). `maxInputTokens` está em **122880**, mas ler 32k a frio leva mais de uma hora: **comece com 12288**. `maxOutputTokens: 8192` pode significar 15 minutos para uma resposta. As outras máquinas entram no mesmo arquivo como `customendpoint` com `apiType: messages` (`http://<IP da máquina>:<porta>/v1`). A API é compatível com OpenAI, então Claude Code, Codex CLI, OpenCode e ferramentas parecidas também funcionam (original: [docs/TERMINAL_LAUNCH.md](docs/TERMINAL_LAUNCH.md), [docs/AI_SETUP.md](docs/AI_SETUP.md)).
 
-Não sabe o que cabe? [Escolha um modelo para o seu computador](docs/MODELS.md#pick-by-memory).
+```jsonc
+{
+  "name": "STRATA-Quadro",
+  "vendor": "customendpoint",
+  "apiKey": "Strata",
+  "apiType": "chat-completions",
+  "models": [
+    {
+      "id": "gemma-4-26b-a4b",
+      "name": "(Quadro) Gemma 4 26B-A4B",
+      "url": "http://localhost:8088/v1",
+      "toolCalling": true,
+      "vision": true,
+      "maxInputTokens": 122880,
+      "maxOutputTokens": 8192
+    }
+  ]
+}
+```
 
-## Instalação
+<a id="fork-only-files"></a>
 
-<a id="option-a-the-strata-app"></a>
+## Arquivos só deste fork
 
-### Aplicativo de desktop
+[`gemma4-server.sh`](gemma4-server.sh) - o lançador usado nesta máquina (raiz do repositório).
+[`tools/gemma4_server.py`](tools/gemma4_server.py) - o servidor HTTP do Gemma 4: API OpenAI, página de monitor, tokenizador, template de chat. Não existe no original.
+[`docs/P2200_GEMMA4.md`](docs/P2200_GEMMA4.md) - o guia em japonês desta máquina: ambiente, flags de compilação, inicialização, solução de problemas.
+Código do Gemma 4 em `src/gemma4/` e `include/strata/gemma4/`, além de `tools/gemma4_*` e `data/dsv41/`.
+`build-local-p2200/` (no gitignore) e os cerca de 15 GB de pesos em `~/models/` (`/models/` está no gitignore) - nunca commitado.
 
-**[Baixar o Strata para Windows, Linux ou Mac →](https://github.com/Niko1221/Strata/releases/latest)**
+<a id="upstream-strata"></a>
 
-Instale o aplicativo, escolha um modelo e comece a conversar. Há um instalador por sistema. Na primeira vez que abre, o aplicativo baixa o motor da sua placa de vídeo. [Ajuda com o instalador](docs/INSTALL.md#the-app).
+## Strata original (app, Terminal, outros modelos)
 
-<sub>Arquivos: `Strata-0.2.13-windows-x64-setup.exe` · `Strata-0.2.13-linux-x86_64.AppImage` · `Strata-0.2.13-macos-arm64.dmg`</sub>
+O código, a documentação e os testes do original continuam nesta árvore. O aplicativo de desktop Strata, o Terminal e as outras famílias de modelos (DeepSeek V4.1-Flash, Qwen3.8-Flash-Next, Qwen3.6-35B-A3B) são publicados pelo original, não por este fork.
 
-<p align="center">
-  <img src="docs/media/app-chat.png" width="900" alt="Aplicativo de desktop do Strata com um chat e uma prévia do código ao vivo lado a lado">
-  <br><sub>Chat, arquivos e prévia ao vivo em uma só janela.</sub>
-</p>
+- Guias: [docs/README.md](docs/README.md) · [docs/MODELS.md](docs/MODELS.md) · [docs/CAPABILITIES.md](docs/CAPABILITIES.md) · [docs/INSTALL.md](docs/INSTALL.md) · [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) · [docs/OLDER_GPUS.md](docs/OLDER_GPUS.md)
+- A linha de instalação do Terminal do original (instala a versão original, não esta compilação):
 
-<a id="option-b-the-terminal-one-line"></a>
-
-### Aplicativo de Terminal
-
-Prefere o terminal? Instale o Strata e execute **`strata launch`**.
-
-<details open>
-<summary><b>Comandos de instalação</b></summary>
-
-**Linux / Mac**
-
-```sh
+```bash
 curl -fsSL --connect-timeout 15 --max-time 120 https://github.com/Niko1221/Strata/releases/latest/download/install.sh -o install.sh && sh install.sh
 ```
-
-**Windows PowerShell**
 
 ```powershell
 irm -TimeoutSec 120 https://github.com/Niko1221/Strata/releases/latest/download/install.ps1 | iex
 ```
 
-No Windows, abra um novo terminal depois. Em seguida:
+<sub>Instaladores do original: `Strata-0.2.13-windows-x64-setup.exe` · `Strata-0.2.13-linux-x86_64.AppImage` · `Strata-0.2.13-macos-arm64.dmg` ([releases/latest](https://github.com/Niko1221/Strata/releases/latest))</sub>
 
-```sh
-strata launch
-```
+Patrocínio e contato **com o autor do original** acontecem em [Niko1221/Strata](https://github.com/Niko1221/Strata) ([GitHub Sponsors](https://github.com/sponsors/Niko1221), [Buy Me a Coffee](https://buymeacoffee.com/strataengine)); este fork não aceita apoio. Privacidade: [docs/SAFETY.md](docs/SAFETY.md).
 
-Siga as instruções para baixar e iniciar um modelo. [Guia do Terminal](docs/TERMINAL_LAUNCH.md).
-
-</details>
-
-<p align="center">
-  <img src="docs/media/terminal-monitor.png" width="900" alt="Aplicativo de Terminal do Strata mostrando a atividade do modelo, a velocidade, a memória e as solicitações recentes">
-  <br><sub>Acompanhe seu modelo e seu hardware enquanto ele roda.</sub>
-</p>
-
-<a id="build-from-source"></a>
-
-[Compilar a partir do código-fonte](docs/SOURCE_INSTALL.md) · [Docker](docs/DOCKER.md) · [Guia de instalação completo](docs/INSTALL.md)
-
-<a id="what-you-need"></a>
-
-## Hardware
-
-| Hardware compatível | Guia |
-| --- | --- |
-| **NVIDIA GeForce RTX 20 / 30 / 40 / 50** | [Instalação para NVIDIA](docs/INSTALL.md#what-you-need) |
-| **AMD Radeon RX 7700 / 7800 / 7900, RX 9060 / 9070, AI PRO R9700** | [Instalação para AMD](docs/AMD_HIP.md) |
-| **AMD Radeon RX 6800 / 6900 · experimental** | [Instalação para RX 6000](docs/AMD_HIP.md#rdna2-gfx1030) |
-| **Intel Arc · Linux** | [Instalação para Intel](docs/INTEL_ARC.md) |
-| **Apple Silicon · M1 ou mais novo** | [Instalação para Mac](docs/MAC.md) |
-| **AMD Ryzen AI Max · Strix Halo** | [Instalação para Strix Halo](docs/STRIX_HALO.md) |
-
-<a id="using-it"></a>
-
-## Ferramentas
-
-**Claude Code · Codex CLI · OpenCode · oh-my-pi · pi.dev · Hermes Agent · OpenClaw**, e outras, pelas APIs compatíveis com OpenAI e Anthropic.
-
-Execute **`strata connect`** para ver as instruções da sua ferramenta. [Guia de conexão](docs/TERMINAL_LAUNCH.md#connect-your-apps-strata-connect).
-
-<a id="guides"></a>
-<a id="how-fast-is-it"></a>
-<a id="how-does-it-work"></a>
-<a id="something-went-wrong"></a>
-
-## Ajuda
-
-[Todos os guias](docs) · [Solução de problemas](docs/TROUBLESHOOTING.md) · [Relatar um bug](https://github.com/Niko1221/Strata/issues/new/choose) ·
-[Benchmarks](docs/COMMUNITY_BENCHMARKS.md) · [Como funciona](docs/HOW_IT_WORKS.md) · [Contribuir](CONTRIBUTING.md)
-
-## Apoie o Strata
-
-**Ajude a manter a IA local aberta para todos.** Um patrocínio no GitHub ou um café ajuda a financiar o desenvolvimento e os testes em mais hardware.
-
-<a href="https://github.com/sponsors/Niko1221"><img src="https://img.shields.io/badge/Sponsor_on_GitHub-EA4AAA?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="GitHub Sponsors: apoie o Strata" height="48"></a>
-<a href="https://buymeacoffee.com/strataengine"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee: apoie o Strata" height="48"></a>
-
-### Apoiadores fiéis
-
-Obrigado a todas as pessoas que apoiam o Strata.
-
-<!-- supporters:start (one line per public supporter, newest last; copy a line and change the GitHub name in all four places) -->
-<a href="https://github.com/ryan4yin"><img src="https://github.com/ryan4yin.png?size=96" width="48" height="48" alt="ryan4yin" title="ryan4yin"></a>
-<a href="https://github.com/themactep"><img src="https://github.com/themactep.png?size=96" width="48" height="48" alt="themactep" title="themactep"></a>
-<a href="https://github.com/macintog"><img src="https://github.com/macintog.png?size=96" width="48" height="48" alt="macintog" title="macintog"></a>
-<a href="https://github.com/bisonbet"><img src="https://github.com/bisonbet.png?size=96" width="48" height="48" alt="bisonbet" title="bisonbet"></a>
-<a href="https://github.com/vizv"><img src="https://github.com/vizv.png?size=96" width="48" height="48" alt="vizv" title="vizv"></a>
-<a href="https://github.com/kod88vn"><img src="https://github.com/kod88vn.png?size=96" width="48" height="48" alt="kod88vn" title="kod88vn"></a>
-<a href="https://github.com/seoulworker"><img src="https://github.com/seoulworker.png?size=96" width="48" height="48" alt="seoulworker" title="seoulworker"></a>
-<a href="https://github.com/jackyini"><img src="https://github.com/jackyini.png?size=96" width="48" height="48" alt="jackyini" title="jackyini"></a>
-<a href="https://github.com/router0mail"><img src="https://github.com/router0mail.png?size=96" width="48" height="48" alt="router0mail" title="router0mail"></a>
-<!-- supporters:end -->
-
-[Licença MIT](LICENSE) · [Créditos e licenças dos modelos](docs/HOW_IT_WORKS.md#credits) · [Privacidade](docs/SAFETY.md)
-
-<a id="option-c-let-your-ai-set-it-up"></a>
-
-<sub>Para ferramentas de IA e leitores automáticos: <a href="AGENTS.md">referência técnica</a> · <a href="docs/AI_SETUP.md">instruções de instalação</a>.</sub>
-
-**Patrocínios, parcerias de hardware ou colaborações:** [niko.veit@outlook.com](mailto:niko.veit@outlook.com).
+Original: [github.com/Niko1221/Strata](https://github.com/Niko1221/Strata) · Esta bifurcação: [github.com/takuya-sawa/Strata_QUADROP2200_Gemma4](https://github.com/takuya-sawa/Strata_QUADROP2200_Gemma4)
