@@ -40,6 +40,7 @@
 #include <cstring>
 #include <deque>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <numeric>
@@ -47,6 +48,9 @@
 #include <string>
 #include <thread>
 #include <vector>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -54,9 +58,72 @@ using Clock = std::chrono::steady_clock;
 double ms_since(Clock::time_point t) { return std::chrono::duration<double, std::milli>(Clock::now() - t).count(); }
 
 constexpr int kMaskPad = 64;   // flash attention wants the mask rows padded to this
+constexpr int64_t kFattnStride = 256;   // ggml's CUDA flash-attn blocks; K/V must span a multiple of it
 constexpr int kBatch = 256;    // prompt tokens per graph
 constexpr int kMaxEmbdBatch = 1280;   // the most tokens one picture may take (the vision tower gives up to 1120)
+constexpr int kGraphNodes = 8192;   // the graph's node capacity; the engine builds ~2900 nodes per step
 std::vector<int32_t> g_stop{1, 106};   // <eos> and <turn|>, the end of a model turn
+
+// The physical cores of this box and whether each of them has more than one hardware thread; 0 if unknowable.
+// ggml's CPU ops saturate the physical cores, so a worker per logical CPU only spins on the hyperthreads.
+int detect_physical_cores(int& threads_per_core) {
+    FILE* f = std::fopen("/proc/cpuinfo", "r");
+    if (!f) return 0;
+    std::map<int, int> cores_of;   // physical id -> the cores it reports
+    int phys = 0, best_siblings = 0, n_proc = 0;
+    char line[256];
+    while (std::fgets(line, sizeof(line), f)) {
+        int v;
+        if (std::sscanf(line, "processor : %d", &v) == 1) ++n_proc;
+        else if (std::sscanf(line, "physical id : %d", &v) == 1) phys = v;
+        else if (std::sscanf(line, "siblings : %d", &v) == 1) best_siblings = std::max(best_siblings, v);
+        else if (std::sscanf(line, "cpu cores : %d", &v) == 1) cores_of[phys] = std::max(cores_of[phys], v);
+    }
+    std::fclose(f);
+    int physical = 0;
+    for (const auto& kv : cores_of) physical += kv.second;
+    if (physical < 1) return 0;
+    const int per_core = cores_of.begin()->second > 0 ? best_siblings / cores_of.begin()->second : 1;
+    threads_per_core = std::max(1, per_core);
+    return n_proc > 0 ? physical : 0;
+}
+
+// A decode step is a chain of tiny ops: past the physical cores each extra worker adds barrier and cache traffic
+// instead of work (measured here: 3 threads 72-91 ms/token, 4 threads 84-190 ms on the same build).  Prefill is
+// the opposite - a big batch does scale to every core.
+int decode_threads(int want) {
+    int tpc = 0;
+    const int physical = detect_physical_cores(tpc);
+    int best = physical > 0 ? physical - (tpc >= 2 ? 0 : 1) : want / 2;   // without SMT, leave a core for the rest
+    if (want <= 2) best = want;                                          // never collapse a small request to one thread
+    if (const char* e = std::getenv("STRATA_G4_THREADS_DECODE")) { const int v = std::atoi(e); if (v > 0) best = v; }
+    return std::max(1, std::min(want, best));
+}
+
+// libgomp reads OMP_WAIT_POLICY / GOMP_SPINCOUNT when the process starts, so a running process cannot change them.
+// Re-exec once with the workers asked to sleep rather than spin, which is what the barrier between ggml's ~2900
+// per-token ops needs (measured on this box: 4-thread decode 108-346 ms/token with the default policy, 82-98 with it).
+void reexec_with_passive_wait(int argc, char** argv) {
+#ifndef _WIN32
+    for (const char* v : {"GOMP_SPINCOUNT", "OMP_WAIT_POLICY"})
+        if (std::getenv(v)) return;                                   // the caller already chose a policy
+    if (std::getenv("STRATA_G4_PASSIVE_WAIT")) return;                 // already re-executed once
+    if (std::thread::hardware_concurrency() < 2) return;
+    if (setenv("STRATA_G4_PASSIVE_WAIT", "1", 1) != 0) return;
+    setenv("GOMP_SPINCOUNT", "0", 1);
+    std::vector<char*> av;
+    av.reserve((size_t) argc + 1);
+    char self[4096];
+    const ssize_t n = readlink("/proc/self/exe", self, sizeof(self) - 1);   // argv[0] is not always a usable path
+    if (n > 0) { self[n] = '\0'; av.push_back(self); } else av.push_back(argv[0]);
+    for (int i = 1; i < argc; ++i) av.push_back(argv[i]);
+    av.push_back(nullptr);
+    execvp(av[0], av.data());                                         // the new process keeps the same environment
+    unsetenv("STRATA_G4_PASSIVE_WAIT");
+    unsetenv("GOMP_SPINCOUNT");
+    std::fprintf(stderr, "strata-gemma4: cannot re-exec with a passive wait policy\n");
+#endif
+}
 bool is_stop(int32_t t) { return std::find(g_stop.begin(), g_stop.end(), t) != g_stop.end(); }
 
 // A piece of a prompt: text tokens, or the embeddings of a picture (read as one batch).
@@ -91,6 +158,8 @@ struct Engine {
     ggml_context* kvctx[2] = {nullptr, nullptr};   // the KV cache: [0] host, [1] GPU
     ggml_backend_buffer_t kvbuf[2] = {nullptr, nullptr};
     ggml_backend_sched_t sched = nullptr;
+    ggml_context* fctx = nullptr;   // the graph metadata, kept for the whole run and rewound by ggml_reset
+    std::vector<uint8_t> fbuf;
     size_t gpu_bytes = 0;
     int gpu_layers = 0;       // layers whose attention and shared FFN run on the GPU
     int gpu_expert_layers = 0;
@@ -100,12 +169,39 @@ struct Engine {
     int n_ctx = 0;
     ggml_type kv_type = GGML_TYPE_Q4_0;
     int swa_cells = 0;   // cells of a sliding-window layer's cache: a ring over the last positions
-    int n_threads = 4;
+    int n_threads = 4;    // the prefill / batch phase
+    int n_threads_dec = 3;   // a decode step (see reexec_with_passive_wait for why the two phases differ)
     std::vector<int64_t> live;   // what the KV cache holds, by position (token ids; see image_key)
     std::vector<float> logits;
 
+    // STRATA_G4_TIME: sums the time of each phase of forward() so the slow parts can be found. Off unless set.
+    // [0] = a decode step (one token), [1] = a prefill batch (several tokens).
+    struct Phase {
+        long long n = 0, n_tok = 0;
+        double build = 0, alloc = 0, fill = 0, upload = 0, compute = 0, tail = 0, sample = 0;
+    };
+    struct Timing {
+        bool on = false;
+        Phase p[2];
+        void add_sample(int nt, double ms) { if (on) p[nt > 1].sample += ms; }
+    };
+    Timing tm;
+    void print_timing(bool last) {
+        if (!tm.on) return;
+        for (int i = 0; i < 2; ++i) {
+            const Phase& q = tm.p[i];
+            if (q.n == 0) continue;
+            std::fprintf(stderr, "timing %s (%lld fwd, %lld tok): build %.3f alloc %.3f fill %.3f upload %.3f compute %.3f tail %.3f sample %.3f ms/fwd\n",
+                         i ? "prefill" : "decode", q.n, q.n_tok, q.build / q.n, q.alloc / q.n, q.fill / q.n,
+                         q.upload / q.n, q.compute / q.n, q.tail / q.n, q.sample / q.n);
+        }
+        if (last) tm.p[0] = tm.p[1] = Phase{};
+    }
+
     ~Engine() {
+        print_timing(true);
         if (sched) ggml_backend_sched_free(sched);
+        if (fctx) ggml_free(fctx);
         for (int i = 0; i < 2; ++i) {
             if (kvbuf[i]) ggml_backend_buffer_free(kvbuf[i]);
             if (kvctx[i]) ggml_free(kvctx[i]);
@@ -139,6 +235,7 @@ struct Engine {
         if (!strata::gemma4::load_model(path, m, err)) return false;
         n_ctx = opt.ctx;
         n_threads = opt.threads;
+        n_threads_dec = std::min(n_threads, decode_threads(n_threads));
         const auto& g = m.geometry;
         if (opt.kv_type == "f16") kv_type = GGML_TYPE_F16;
         else if (opt.kv_type == "q8_0") kv_type = GGML_TYPE_Q8_0;
@@ -274,12 +371,20 @@ struct Engine {
             ggml_backend_buffer_clear(kvbuf[i], 0);
         }
 
+        tm.on = std::getenv("STRATA_G4_TIME") != nullptr;
+
         std::vector<ggml_backend_t> backends;
         if (gpu) backends.push_back(gpu);
         backends.push_back(cpu);
-        sched = ggml_backend_sched_new(backends.data(), nullptr, (int) backends.size(), 8192, false,
+        sched = ggml_backend_sched_new(backends.data(), nullptr, (int) backends.size(), kGraphNodes, false,
                                        gpu != nullptr && opt.op_offload);
         if (!sched) { err = "cannot create the backend scheduler"; return false; }
+
+        // the graph metadata lives in one buffer for the whole run: ggml_reset rewinds it instead of the allocator
+        // seeing a fresh malloc and free of ~1 MiB on every step
+        fbuf.resize(ggml_tensor_overhead() * (size_t) kGraphNodes * 2 + ggml_graph_overhead_custom(kGraphNodes, false));
+        fctx = ggml_init(ggml_init_params{fbuf.size(), fbuf.data(), true});
+        if (!fctx) { err = "cannot create the graph context"; return false; }
         if (gpu)
             std::fprintf(stderr, "strata-gemma4: GPU: %d of %zu layers (attention + shared FFN + KV)%s, experts of %d layers, "
                          "%.0f MiB of weights and cache\n", gpu_layers, m.layers.size(), head_gpu ? ", token embedding / head" : "",
@@ -296,19 +401,33 @@ struct Engine {
         const int64_t n_embd = g.n_embd, n_head = g.n_heads, n_kv = n_past + nt;
         const int64_t n_exp = g.n_experts, n_used = g.experts_per_token;
         const float eps = (float) g.rms_epsilon;
-        const size_t n_nodes = 8192;
-        std::vector<uint8_t> buf(ggml_tensor_overhead() * n_nodes + ggml_graph_overhead_custom(n_nodes, false));
-        ggml_init_params ip{buf.size(), buf.data(), true};
-        ggml_context* ctx = ggml_init(ip);
-        ggml_cgraph* gf = ggml_new_graph_custom(ctx, n_nodes, false);
+        auto t_ph = Clock::now();
+        const int ph = nt > 1;   // 0 = a decode step, 1 = a prefill batch
+        auto lap = [&](double Phase::* member) { const auto n = Clock::now(); tm.p[ph].*member += ms_since(t_ph); t_ph = n; };
+        ggml_context* ctx = fctx;
+        ggml_reset(ctx);
+        ggml_cgraph* gf = ggml_new_graph_custom(ctx, kGraphNodes, false);
 
         ggml_tensor* t_tok = emb ? nullptr : ggml_new_tensor_1d(ctx, GGML_TYPE_I32, nt);
         ggml_tensor* t_emb = emb ? ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_embd, nt) : nullptr;
         ggml_tensor* t_pos = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, nt);
         const int64_t nt_pad = ((nt + kMaskPad - 1) / kMaskPad) * kMaskPad;
-        ggml_tensor* t_mask_full = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, n_kv, nt_pad);
-        const int64_t n_kv_swa = std::min<int64_t>(swa_cells, n_kv);
-        ggml_tensor* t_mask_swa = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, n_kv_swa, nt_pad);
+        // CUDA only has flash-attn kernels for 512-wide heads in the GQA-optimised variants, and those require the
+        // key/value span to be a multiple of FATTN_KQ_STRIDE (256) or the op is run on the CPU. Round the global
+        // layers' span up to that block size; the extra cells are past the cache's valid rows, so they stay masked
+        // out and the kernel trims them with the mask scan.
+        const int64_t n_att_full = std::min(((n_kv + kFattnStride - 1) / kFattnStride) * kFattnStride, (int64_t) n_ctx);
+        // the sliding-window span is the cache length as it is: rounding it up to the flash-attn block size selects a
+        // different kernel variant (the GQA-optimised one), which changes the numbers, so the key/value span stays exact
+        const int64_t n_kv_swa = std::min(n_kv, (int64_t) swa_cells);
+        // What the allocator's graph plan actually has to keep valid is the *mask* leaf: the key/value tensors are views
+        // into the cache and claim no buffer, so the mask's width - which grew one element per decoded token and threw
+        // the plan away every step - is the only size that matters. Rounding just that up keeps the plan (the kernels
+        // walk the mask through nb[1], so a wider row is read as the same values) and costs nothing.
+        const int64_t swa_max = ((swa_cells + kFattnStride - 1) / kFattnStride) * kFattnStride;
+        const int64_t n_mask_swa = std::min(((n_kv_swa + kFattnStride - 1) / kFattnStride) * kFattnStride, swa_max);
+        ggml_tensor* t_mask_full = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, n_att_full, nt_pad);
+        ggml_tensor* t_mask_swa = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, n_mask_swa, nt_pad);
         ggml_tensor* t_out = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 1);
         for (ggml_tensor* t : {t_tok, t_emb, t_pos, t_mask_full, t_mask_swa, t_out})
             if (t) ggml_set_input(t);
@@ -375,7 +494,7 @@ struct Engine {
             store(v, vc[(size_t) il]);
 
             ggml_tensor* qa = ggml_permute(ctx, q, 0, 2, 1, 3);
-            const int64_t n_att = lg.sliding_window ? n_kv_swa : n_kv;
+            const int64_t n_att = lg.sliding_window ? n_kv_swa : n_att_full;
             ggml_tensor* ka = ggml_view_3d(ctx, kc[(size_t) il], hd, n_att, nkv, kc[(size_t) il]->nb[1],
                                            ggml_row_size(kv_type, hd), 0);
             ggml_tensor* va = ggml_view_3d(ctx, vc[(size_t) il], hd, n_att, nkv, vc[(size_t) il]->nb[1],
@@ -441,35 +560,43 @@ struct Engine {
         ggml_set_output(cur);
         ggml_build_forward_expand(gf, cur);
 
+        lap(&Phase::build);
         ggml_backend_sched_reset(sched);
         if (!ggml_backend_sched_alloc_graph(sched, gf)) {
             std::fprintf(stderr, "strata-gemma4: cannot allocate the compute graph\n");
-            ggml_free(ctx);
             return false;
         }
+        lap(&Phase::alloc);
         std::vector<int32_t> pos((size_t) nt);
         std::iota(pos.begin(), pos.end(), n_past);
         const ggml_fp16_t neg = ggml_fp32_to_fp16(-INFINITY), zero = ggml_fp32_to_fp16(0.0f);
-        std::vector<ggml_fp16_t> mfull((size_t) (n_kv * nt_pad), neg), mswa((size_t) (n_kv_swa * nt_pad), neg);
+        std::vector<ggml_fp16_t> mfull((size_t) (n_att_full * nt_pad), neg), mswa((size_t) (n_mask_swa * nt_pad), neg);
         const int64_t newest = (int64_t) n_past + nt - 1;
         for (int j = 0; j < nt; ++j) {
             const int64_t qj = (int64_t) n_past + j;
-            for (int64_t i = 0; i <= qj; ++i) mfull[(size_t) (j * n_kv + i)] = zero;
-            // cell c holds the newest position congruent to c modulo the ring size
+            for (int64_t i = 0; i <= qj; ++i) mfull[(size_t) (j * n_att_full + i)] = zero;
+            // cell c holds the newest position congruent to c modulo the ring size; the padding columns past the
+            // cache stay masked out (the vector was built with -inf) because no kernel reads past K->ne[1]
             for (int64_t c = 0; c < n_kv_swa; ++c) {
                 const int64_t pc = newest - (((newest - c) % swa_cells) + swa_cells) % swa_cells;
-                if (pc >= 0 && (emb || pc <= qj) && qj - pc < g.sliding_window) mswa[(size_t) (j * n_kv_swa + c)] = zero;
+                if (pc >= 0 && (emb || pc <= qj) && qj - pc < g.sliding_window) mswa[(size_t) (j * n_mask_swa + c)] = zero;
             }
         }
         const int32_t last = nt - 1;
+        lap(&Phase::fill);
+        // a decode step scales best with fewer workers than a prefill batch (measured on this 4-core box: 3 threads
+        // beat 4 by 1.5-2x per token, while prefill wants every core), so switch the CPU backend per phase
+        if (n_threads_dec != n_threads) ggml_backend_cpu_set_n_threads(cpu, nt > 1 ? n_threads : n_threads_dec);
         if (emb) ggml_backend_tensor_set(t_emb, emb, 0, (size_t) nt * (size_t) n_embd * sizeof(float));
         else ggml_backend_tensor_set(t_tok, toks, 0, (size_t) nt * sizeof(int32_t));
         ggml_backend_tensor_set(t_pos, pos.data(), 0, pos.size() * sizeof(int32_t));
         ggml_backend_tensor_set(t_mask_full, mfull.data(), 0, mfull.size() * sizeof(ggml_fp16_t));
         ggml_backend_tensor_set(t_mask_swa, mswa.data(), 0, mswa.size() * sizeof(ggml_fp16_t));
         ggml_backend_tensor_set(t_out, &last, 0, sizeof(last));
+        lap(&Phase::upload);
 
         const bool ok = ggml_backend_sched_graph_compute(sched, gf) == GGML_STATUS_SUCCESS;
+        lap(&Phase::compute);
         if (ok && debug && nt > 1)
             for (ggml_tensor* t : probes) {
                 std::vector<float> v((size_t) ggml_nelements(t));
@@ -482,7 +609,8 @@ struct Engine {
             logits.resize((size_t) g.n_vocab);
             ggml_backend_tensor_get(cur, logits.data(), 0, logits.size() * sizeof(float));
         }
-        ggml_free(ctx);
+        lap(&Phase::tail);
+        if (tm.on) { ++tm.p[ph].n; tm.p[ph].n_tok += nt; }
         return ok;
     }
 
@@ -708,7 +836,9 @@ struct Serve {
         long long produced = 0;
         const char* finish = "length";
         for (;;) {
+            const auto s0 = Clock::now();
             const int32_t nx = sample(E.logits, smp, hist, rng);
+            E.tm.add_sample(1, ms_since(s0));
             std::printf("T %d\n", nx);
             std::fflush(stdout);
             ++produced;
@@ -724,6 +854,7 @@ struct Serve {
         std::fflush(stdout);
         std::fprintf(stderr, "strata-gemma4: %lld generated in %.0f ms (%.2f tok/s) (%s)\n", produced, decode_ms,
                      decode_ms > 0 ? 1000.0 * (double) produced / decode_ms : 0.0, finish);
+        E.print_timing(true);
     }
 
     int run() {
@@ -760,9 +891,15 @@ struct Serve {
 }  // namespace
 
 int strata::gemma4::run(int argc, char** argv) {
+    reexec_with_passive_wait(argc, argv);
     std::string model, tokens, dump;
     Engine::Options opt;
     opt.threads = (int) std::max(1u, std::thread::hardware_concurrency());
+    {   // ggml's CPU kernels scale with the physical cores; the extra logical CPUs only add spin and cache traffic
+        int tpc = 0;
+        const int physical = detect_physical_cores(tpc);
+        if (physical > 0) opt.threads = std::min<int>(std::max(1u, std::thread::hardware_concurrency()), physical * std::max(1, tpc));
+    }
     int& ctx = opt.ctx;
     int& threads = opt.threads;
     int n_gen = 64;
