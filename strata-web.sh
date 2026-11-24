@@ -94,10 +94,22 @@ JSON
   echo "接続を作成しました: $PROVIDERS_FILE (会話のモデルピッカーに '$MODEL_ID' が出ます)"
 fi
 
-cleanup() { [ -n "$ENGINE_PID" ] && kill "$ENGINE_PID" 2>/dev/null; }
+# 終了ときはエンジンに SIGINT (サーバー自身がエンジン子プロセスを片付ける) → 効かなければ SIGTERM/KILL。
+# エンジンの子 (strata-gemma4) が GPU を掴んだまま残らないように、残っていたら個別に止めます。
+cleanup() {
+  [ -z "$ENGINE_PID" ] && return
+  kill -INT "$ENGINE_PID" 2>/dev/null
+  for _ in $(seq 1 20); do kill -0 "$ENGINE_PID" 2>/dev/null || break; sleep 0.5; done
+  kill -TERM "$ENGINE_PID" 2>/dev/null
+  for _ in $(seq 1 10); do kill -0 "$ENGINE_PID" 2>/dev/null || break; sleep 0.5; done
+  kill -9 "$ENGINE_PID" 2>/dev/null
+  for child in $(ps -o pid= --ppid "$ENGINE_PID" 2>/dev/null); do kill "$child" 2>/dev/null; done
+}
 trap cleanup EXIT INT TERM
 
+# exec だと trap が消えるので、 node はフォアグラウンドで走らせてCtrl+C を node にそのまま届け、
+# 終わったら (EXIT の trap で) 自分が起動したエンジンだけを片付ける。
 echo "Strata Web 画面: http://$BIND:$PORT/  (この PC 上のみ。他の PC からは ssh -L $PORT:localhost:$PORT <このPC>)"
 echo "会話のモデル:    http://127.0.0.1:$ENGINE_PORT/v1 の $MODEL_ID  (終了は Ctrl+C)"
 cd "$HOST_DIR" || exit 1
-exec node server/index.mjs --dist dist
+node server/index.mjs --dist dist

@@ -201,6 +201,7 @@ OpenAI 互換なので、Claude Code・Codex CLI・OpenCode などからも使�
 - 画像が 400 になる → `mmproj-gemma-4-26B*.gguf` がモデルと同じ場所にあるか、`build-local-p2200/strata-gemma4-vision` があるか確認してください。
 - 全体的に遅い / スワップが増えていく → まずメモリ不足を疑ってください。`MAX_CONTEXT` を下げ、ブラウザなどを閉じ、`--no-gpu` は使わないでください。
 - Web 画面で `inference · simulated` となる / 「No model is loaded」が続く → エンジンが見てもらえていません。`curl http://127.0.0.1:8088/v1/status` が `"service":"strata"` を返すか確認し、返らないなら (古いコードで動いているサーバーを止めて) `./strata-web.sh` をもう一度実行してください。モデルピッカーで API の "Gemma 4 26B-A4B" が選ばれているかも確認してください。
+- Ctrl+C 後に GPU が空かない / `:8088` が塞がったまま → 古い `strata-gemma4` が残っています。`ps -C strata-gemma4` で PID を見て `kill <PID>` してください (GPU を掴んでいるかは `nvidia-smi` で確認できます)。
 - Web 画面の `/api/...` が 403 になる →Origin が localhost 以外から来ています (`STRATA_BIND` を変更したり、直接 IP で開いたりしていませんか)。loopback または `ssh -L` で開いてください。
 - トラブルの一般手順: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 
