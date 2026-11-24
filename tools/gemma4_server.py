@@ -6,6 +6,7 @@
     GET  /                      the chat page
     GET  /monitor               live status page (GPU, the running request, speed, history)
     GET  /status                the same as JSON
+    GET  /v1/status             who this server is (Strata's host recognises it by "service": "strata")
     GET  /v1/models
     POST /v1/chat/completions   messages, max_tokens, temperature, top_p, top_k, stream
 
@@ -36,6 +37,10 @@ from gguf_reader import GGUFFile  # noqa: E402
 from strata_tokenizer import Tokenizer  # noqa: E402
 
 STOP_TOKENS = ("<eos>", "<turn|>", "<|tool_response>")   # the end of a turn; the tool's answer is the runtime's to write
+# What a reply may write when the request does not say: Strata's host sends no max_tokens of its own (its chat
+# composer has no length setting), so 512 used to cut a normal answer off mid-sentence.  Still clamped to the room
+# the prompt leaves in the context, as every request is.
+DEFAULT_MAX_TOKENS = 4096
 
 PAGE = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Gemma 4 (Strata)</title>
@@ -302,8 +307,49 @@ class Engine:
                         break
 
 
+def v1_status(name: str, stats: Stats, vision: "Vision | None", engine_version: str | None) -> dict:
+    """GET /v1/status: who this server is, in the shape Strata's host asks a worker before it adopts it (its
+    `probeStrata` requires `service: "strata"`, and takes the model, the window and the APIs from here).  The
+    timings keep llama.cpp's names so a client that reads a llama-server's timings reads the same here."""
+    s = stats.snapshot()
+    last = s["history"][0] if s["history"] else None
+    timings = None
+    if last:
+        prompt_ms, tok_s = last["prompt_s"] * 1000, last["tok_s"]
+        n = last["generated"]
+        decode_ms = (n / tok_s * 1000) if tok_s else None
+        timings = {"cache_n": 0,
+                   "prompt_n": last["prompt_tokens"], "prompt_ms": round(prompt_ms, 1),
+                   "prompt_per_token_ms": round(prompt_ms / last["prompt_tokens"], 3) if last["prompt_tokens"] else None,
+                   "prompt_per_second": round(last["prompt_tokens"] / (prompt_ms / 1000), 1) if prompt_ms > 0 else None,
+                   "predicted_n": n, "predicted_ms": round(decode_ms, 1) if decode_ms else None,
+                   "predicted_per_token_ms": round(decode_ms / n, 3) if decode_ms and n else None,
+                   "predicted_per_second": round(tok_s, 1) if tok_s else None,
+                   "finish": last["finish"]}
+    gpu = s["gpu"]
+    return {"service": "strata", "model": name, "loaded": True, "auto_load": False,
+            "engine": engine_version,
+            "started": int(stats.started), "uptime_s": int(s["uptime"]),
+            "cache_max_tokens": s["max_context"],
+            "context": {"native": s["max_context"], "max_positions": s["max_context"]},
+            # the engine holds one conversation's KV cache: one request at a time, the rest wait their turn
+            "concurrency": {"serving": 1, "requested": 1},
+            "dialects": ["/v1/chat/completions"],
+            "vision": {"enabled": vision is not None, "available": vision is not None, "error": None},
+            "image_generation": {"enabled": False},
+            "activity": {"requests": s["requests"], "in_flight": s["waiting"] + int(bool(s["current"])),
+                         "last_request_at": int(last["finished"]) if last else None},
+            "last_timings": timings,
+            "vram": {},
+            "machine": {"at": int(time.time()),
+                        "gpu": {"name": gpu["name"], "used_mib": gpu["mem_used"], "total_mib": gpu["mem_total"],
+                                "util_pct": gpu["util"], "temp_c": gpu["temp"]} if gpu else None,
+                        "ram": {"available_mib": round(s["mem_available_mib"], 1)},
+                        "load": [round(x, 2) for x in s["load"]]}}
+
+
 def make_handler(engine: Engine, tok: Tokenizer, template: ChatTemplate, stop_ids: tuple, name: str, stats: Stats,
-                 vision: Vision | None):
+                 vision: "Vision | None", engine_version: str | None = None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -348,9 +394,13 @@ def make_handler(engine: Engine, tok: Tokenizer, template: ChatTemplate, stop_id
             elif path == "/status":
                 self._json(200, stats.snapshot())
             elif path == "/v1/models":
-                self._json(200, {"object": "list", "data": [{"id": name, "object": "model", "owned_by": "strata"}]})
+                self._json(200, {"object": "list", "data": [{"id": name, "object": "model", "owned_by": "strata",
+                                                             "modalities": {"input": ["text", "image"] if vision else ["text"]}}]})
+            elif path == "/v1/status":
+                self._json(200, v1_status(name, stats, vision, engine_version))
             elif path in ("/health", "/healthz"):
-                self._json(200, {"status": "ok"})
+                self._json(200, {"status": "ok", "service": "strata", "model": name, "loaded": True,
+                                 "max_context": engine.max_context, "images": vision is not None})
             else:
                 self._error(404, "not found")
 
@@ -383,7 +433,7 @@ def make_handler(engine: Engine, tok: Tokenizer, template: ChatTemplate, stop_id
                     n_prompt = len(ids)
             except (ValueError, KeyError, TypeError, AttributeError, OSError) as e:
                 return self._error(400, f"bad request: {e}")
-            max_new = int(req.get("max_tokens") or req.get("max_completion_tokens") or 512)
+            max_new = int(req.get("max_tokens") or req.get("max_completion_tokens") or DEFAULT_MAX_TOKENS)
             room = engine.max_context - n_prompt
             if room < 1:
                 if prompt_file:
@@ -501,7 +551,11 @@ def main() -> int:
     helper = Path(args.strata).resolve().parent / "strata-gemma4-vision"
     vision = Vision(str(helper), args.model, str(mmproj), args.vision_threads) if mmproj and helper.exists() else None
     print("pictures:", f"on ({Path(mmproj).name})" if vision else "off (no mmproj or no strata-gemma4-vision)", flush=True)
-    httpd = ThreadingHTTPServer((args.host, args.port), make_handler(engine, tok, template, stop_ids, args.name, Stats(args.max_context), vision))
+    try:   # what /v1/status reports as "engine", so a client can tell which build answered
+        version = subprocess.run([args.strata, "--version"], capture_output=True, text=True, timeout=10).stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
+        version = None
+    httpd = ThreadingHTTPServer((args.host, args.port), make_handler(engine, tok, template, stop_ids, args.name, Stats(args.max_context), vision, version))
     httpd.daemon_threads = True
     print(f"Gemma 4 server on http://{args.host}:{args.port}/ (OpenAI API: /v1/chat/completions, monitor: /monitor)", flush=True)
     try:

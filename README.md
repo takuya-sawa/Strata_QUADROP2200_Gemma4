@@ -98,10 +98,29 @@ cmake --build build-local-p2200 -j4
 | `http://localhost:8088/` | chat page |
 | `http://localhost:8088/monitor` | live page with GPU, running request, speed and history (`/status` returns the same as JSON) |
 | `http://localhost:8088/v1/chat/completions` | OpenAI-compatible API (`stream`, `tools`); `/v1/models` answers `gemma-4-26b-a4b` |
+| `http://localhost:8088/v1/status` | JSON the upstream Strata web UI uses to recognise the engine (`"service": "strata"`, context, vision, engine version) |
+| `http://localhost:8088/health` | liveness check (`{"status":"ok","service":"strata", ...}`) |
+
+Requests without `max_tokens` (or `max_completion_tokens`) may generate up to `DEFAULT_MAX_TOKENS = 4096` tokens, clamped to the room left in the context.
 
 Pictures work when `mmproj-gemma-4-26B*.gguf` sits next to the model file (otherwise image requests return 400). **There is no
 authentication** and the server listens on `0.0.0.0`, so keep it on a trusted network; for a local-only server start
 `python3 tools/gemma4_server.py` with `--host 127.0.0.1`. Requests are served one at a time (there is a single KV cache).
+
+<a id="web-ui"></a>
+
+## The upstream web UI
+
+`apps/host/` (the upstream Strata web UI) runs against this fork's engine on `:8088`:
+
+```bash
+./strata-web.sh          # → http://127.0.0.1:8791/  (prepares Node 24 and dist when missing)
+```
+
+Dismiss the setup modal with "Go straight to the app", then pick **"Gemma 4 26B-A4B"** under API models in the chat model
+picker (per chat). `inference · Strata engine` on the console is the healthy state; token stats are on
+`http://localhost:8088/monitor`. The UI listens on loopback only — reach it from another machine with
+`ssh -L 8791:localhost:8791 <this PC>`. Full steps and caveats: [docs/P2200_GEMMA4.md](docs/P2200_GEMMA4.md#web-ui).
 
 <a id="vs-code"></a>
 
@@ -140,6 +159,7 @@ OpenAI-compatible, so Claude Code, Codex CLI, OpenCode and similar tools work to
 ## Fork-only files
 
 - [`gemma4-server.sh`](gemma4-server.sh) - the launcher used on this machine (repository root).
+- [`strata-web.sh`](strata-web.sh) - starts the upstream web UI (`apps/host/`) against the engine above; prepares Node 24, `dist` and the chat model connection.
 - [`tools/gemma4_server.py`](tools/gemma4_server.py) - the Gemma 4 HTTP server: OpenAI API, monitor page, tokenizer, chat template. Not in upstream.
 - [`docs/P2200_GEMMA4.md`](docs/P2200_GEMMA4.md) - the Japanese guide for this machine: environment, build flags, startup, troubleshooting.
 - Gemma 4 code in `src/gemma4/` and `include/strata/gemma4/`, plus `tools/gemma4_*` helpers and `data/dsv41/`.

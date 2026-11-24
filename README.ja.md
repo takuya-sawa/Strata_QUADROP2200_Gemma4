@@ -95,6 +95,20 @@ cmake --build build-local-p2200 -j4
 
 画像は `mmproj-gemma-4-26B*.gguf` がモデルと同じ場所にあるときだけ動きます (ないと画像リクエストは 400)。**認証はありません** (`0.0.0.0` で待ち受けます)。信頼できるネットワークだけで使い、ローカルだけにしたいときは `python3 tools/gemma4_server.py` に `--host 127.0.0.1` を付けて起動してください。リクエストは KV キャッシュが 1 個なので 1 件ずつ処理されます。
 
+サーバーは他に `/v1/status` (`"service":"strata"` — 本家の Web 画面がエンジンを識別するために使う) と `/health` も返します。`max_tokens` を入れないリクエストの出力は 4096 まで伸びます。
+
+<a id="web-ui"></a>
+
+## 本家の Web 画面 (アプリの UI)
+
+本家 Strata の Web 画面 (`apps/host/`) を、上の `:8088` のエンジンに繋いで使えます。
+
+```bash
+./strata-web.sh          # → http://127.0.0.1:8791/  (Node 24 と dist が無いとき自動で用意します)
+```
+
+セットアップのモーダルは **「すぐにアプリを使う」** で閉じ、会話のモデルピッカーの API models から **「Gemma 4 26B-A4B」** を選んでください (会話ごとに選ぶ)。コンソールに `inference · Strata engine` と出るのが正常な状態で、トークン数などの詳細な統計は `http://localhost:8088/monitor` に見えます。loopback 限定なので、他の PC からは `ssh -L 8791:localhost:8791 <このPC>` で開きます。手順と注意は [docs/P2200_GEMMA4.md](docs/P2200_GEMMA4.md#web-ui)。
+
 <a id="vs-code"></a>
 
 ## VS Code
@@ -128,6 +142,7 @@ cmake --build build-local-p2200 -j4
 ## このフォークだけのファイル
 
 - [`gemma4-server.sh`](gemma4-server.sh) — この環境で使っている起動スクリプト (リポジトリ直下)。
+- [`strata-web.sh`](strata-web.sh) — 本家の Web 画面 (`apps/host/`) を上のエンジンに繋いで起動するスクリプト (Node 24・`dist`・接続設定をまとめて用意します)。
 - [`tools/gemma4_server.py`](tools/gemma4_server.py) — Gemma 4 用 HTTP サーバー (OpenAI 互換 API・モニタページ・トークナイザ・チャットテンプレート)。本家にはありません。
 - [`docs/P2200_GEMMA4.md`](docs/P2200_GEMMA4.md) — このマシンのガイド (動作環境・ビルドフラグ・起動・つまずいたとき)。
 - `src/gemma4/` と `include/strata/gemma4/` の Gemma 4 用のコード、`tools/gemma4_*` の補助ツール、`data/dsv41/`。
