@@ -256,6 +256,10 @@ struct Engine {
         // --- what goes to the GPU: the tensors every token reads (attention, shared FFN, router, norms) and that
         // layer's KV cache, layer by layer, the token embedding / head, then whole layers' experts, while the budget lasts
         std::vector<char> layer_gpu(m.layers.size(), 0), experts_gpu(m.layers.size(), 0);
+        size_t expert_layers_total = 0;
+        for (const auto& layer : m.layers)
+            if (bytes_of(layer.expert_gate_up) && bytes_of(layer.expert_down)) ++expert_layers_total;
+        size_t gpu_expert_bytes = 0;
         bool head_gpu = false;
         auto cells_of = [&](size_t il) { return g.layers[il].sliding_window ? swa_cells : n_ctx; };
         auto kv_bytes = [&](size_t il) {
@@ -295,6 +299,7 @@ struct Engine {
                 experts_gpu[il] = 1;
                 budget -= (long long) need;
                 ++gpu_expert_layers;
+                gpu_expert_bytes += need;
             }
         }
 #else
@@ -389,6 +394,11 @@ struct Engine {
             std::fprintf(stderr, "strata-gemma4: GPU: %d of %zu layers (attention + shared FFN + KV)%s, experts of %d layers, "
                          "%.0f MiB of weights and cache\n", gpu_layers, m.layers.size(), head_gpu ? ", token embedding / head" : "",
                          gpu_expert_layers, (double) gpu_bytes / 1048576.0);
+        std::printf("INFO expert_slots=%lld experts=%lld expert_cache_mib=%lld expert_layers_gpu=%d expert_layers_total=%zu\n",
+                    (long long) gpu_expert_layers * g.n_experts,
+                    (long long) expert_layers_total * g.n_experts,
+                    (long long) (gpu_expert_bytes >> 20), gpu_expert_layers, expert_layers_total);
+        std::fflush(stdout);
         return true;
     }
 

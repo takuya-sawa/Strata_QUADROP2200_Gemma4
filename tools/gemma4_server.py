@@ -222,7 +222,7 @@ class Stats:
                                                 ("util", "mem_used", "temp", "power", "power_limit",
                                                  "pcie_gen", "pcie_gen_max", "pcie_width", "pcie_rx_mb")}}]
         return {"engine": {**engine.info, "model": name, "max_context": engine.max_context,
-                           "images": vision is not None, "experts": experts},
+                           "images": vision is not None, "experts": engine.info.get("experts", experts)},
                 "live": live, "requests": records if all_requests else records[:12], "requests_kept": len(records),
                 "totals": totals, "hardware": hardware, "hardware_static": tel["static"],
                 "history": tel["history"], "time": now}

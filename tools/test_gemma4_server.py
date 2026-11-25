@@ -14,7 +14,8 @@ class FakeProcess:
     def __init__(self, *args, **kwargs):
         self.stdin = io.StringIO()
         self.stdout = io.StringIO(
-            "INFO expert_slots=12 expert_cache_mib=256\nREADY 1024 stop\n"
+            "INFO expert_slots=12 experts=384 expert_cache_mib=256 expert_layers_gpu=3 expert_layers_total=30\n"
+            "READY 1024 stop\n"
             "PP 5 10 100 50\nT 42\nT 99\n"
             "DONE 2 10 100 250 stop 0 0 4 3 6 0 0 0.0 6 2\n"
         )
@@ -62,6 +63,10 @@ class MonitorTest(unittest.TestCase):
             metrics = json.load(response)
         self.assertEqual(metrics["api"], {"host": "127.0.0.1", "port": server.server_port, "authentication": "none"})
         self.assertEqual(metrics["engine"]["expert_slots"], 12)
+        self.assertEqual(metrics["engine"]["experts"], 384)
+        self.assertEqual(metrics["engine"]["expert_cache_mib"], 256)
+        self.assertEqual(metrics["engine"]["expert_layers_gpu"], 3)
+        self.assertEqual(metrics["engine"]["expert_layers_total"], 30)
         self.assertEqual(metrics["live"]["state"], "idle")
         self.assertEqual(metrics["requests"][0]["reused"], 4)
         self.assertEqual(metrics["requests"][0]["hit_rate"], 0.5)
