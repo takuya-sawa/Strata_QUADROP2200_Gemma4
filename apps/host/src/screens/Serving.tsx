@@ -10,8 +10,30 @@ import { Btn, Dialog, Empty, Icon, IconBtn, Seg, Select, ErrorNotice } from '../
 import { Screen, SectionHead } from '../components/layout';
 import { clockTime, duration, tokens } from '../lib/format';
 import { cancelRequest, setLocalSharing, setServingAccess, useStore } from '../lib/store';
+import type { MonitorState } from '../lib/types';
+
+function ExternalServing({ monitor }: { monitor: MonitorState }) {
+    const external = monitor.externalEngine!;
+    const id = external.modelId ?? external.configuredModelId;
+    const requests = monitor.requests ?? [];
+    return <Screen title={tr("Serving")}><div className="stack stack--lg">
+      <section className="st-card serving-overview"><dl className="summary-list">
+        <div><dt>{tr("API base URL")}</dt><dd className="row"><code>{external.apiBaseUrl ?? tr("Unavailable")}</code><CopyBtn text={external.apiBaseUrl ?? ''} label="API base URL" title="Copy API base URL" disabled={!external.apiBaseUrl}/></dd></div>
+        <div><dt>{tr("Model ID")}</dt><dd className="row"><code>{id}</code><CopyBtn text={id} label="Model ID" title="Copy Model ID"/></dd></div>
+        <div><dt>{tr("Status")}</dt><dd><span className="api-status" data-active={external.connected}><span className="api-status__dot"/>{tr(external.connected ? 'Connected' : 'Unavailable')}</span></dd></div>
+        <div><dt>{tr("API key")}</dt><dd>{tr(external.authentication === 'none' ? 'No API key' : 'Unavailable')}{tr(external.authentication === 'none' ? <p className="xs muted">{tr("Without an API key, anyone who can reach this address can use your model.")}</p> : null)}</dd></div>
+      </dl></section>
+      <section className="request-section"><SectionHead title={tr("Requests")}/>
+        {tr(requests.length ? <div className="st-tablewrap"><table className="st-table"><thead><tr><th>{tr("Time")}</th><th>{tr("Status")}</th><th>{tr("Tokens in / out")}</th><th>{tr("Duration")}</th></tr></thead><tbody>
+          {requests.map(r => <tr key={r.id}><td>{clockTime(r.at)}</td><td>{tr(r.state.charAt(0).toUpperCase() + r.state.slice(1))}</td><td>{tokens(r.tokensIn)} / {tokens(r.tokensOut)}</td><td>{r.durationMs ? duration(r.durationMs) : '—'}</td></tr>)}
+        </tbody></table></div> : <Empty icon="link" title={tr("No requests yet")} body={tr("Requests appear here when a client or Strata chat uses the API.")}/>)}
+      </section>
+    </div></Screen>;
+}
+
 export function ServingScreen() {
     const serving = useStore(s => s.serving);
+    const monitor = useStore(s => s.monitor);
     const storedRuntime = useStore(s => s.runtime), hardware = useStore(s => s.hardware);
     const native = useNative();
     const runtime = nativeRouting(native, hardware) ?? storedRuntime;
@@ -53,6 +75,8 @@ export function ServingScreen() {
     }, [selected?.id, selected?.cancellable]);
     if (!serving)
         return <Screen title={tr("Serving")}><p className="muted">{tr("Waiting for API status\u2026")}</p></Screen>;
+    if (monitor?.externalEngine)
+        return <ExternalServing monitor={monitor}/>;
     const multipleModels = (runtime?.instances.length ?? 0) > 1;
     const filterId = multipleModels && runtime?.instances.some(i => i.id === modelFilter) ? modelFilter : 'all';
     const loaded = runtime?.instances.find(i => i.apiModelId === guideModel) ?? runtime?.instances.find(i => i.id === runtime.defaultId);

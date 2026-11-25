@@ -499,7 +499,10 @@ def make_handler(engine: Engine, tok: Tokenizer, template: ChatTemplate, stop_id
                 self._send(200, PAGE.encode(), "text/html; charset=utf-8")
             elif path == "/metrics":
                 all_requests = "all" in parse_qs(urlsplit(self.path).query).get("requests", [])
-                self._json(200, stats.metrics(engine, name, vision, experts, all_requests))
+                metrics = stats.metrics(engine, name, vision, experts, all_requests)
+                metrics["api"] = {"host": self.server.server_address[0],
+                                  "port": self.server.server_address[1], "authentication": "none"}
+                self._json(200, metrics)
             elif path == "/status":
                 self._json(200, stats.snapshot())
             elif path == "/v1/models":

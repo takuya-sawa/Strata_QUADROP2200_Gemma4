@@ -262,7 +262,7 @@ export interface MonitorSample {
 }
 
 export interface MonitorState {
-  externalEngine?: { connectionId: string; configuredModelId: string; modelId: string | null; connected: boolean };
+  externalEngine?: { connectionId: string; configuredModelId: string; modelId: string | null; connected: boolean; apiBaseUrl: string | null; authentication: 'none' | null };
   telemetry?: { throughput: string; thermals: string; memory: string; system?:string; context?: string; ttftMs?: number | null };
   phase: 'idle' | 'reading' | 'thinking' | 'generating' | 'loading' | 'error';
   phaseLabel: string;

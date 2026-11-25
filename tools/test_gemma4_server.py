@@ -60,6 +60,7 @@ class MonitorTest(unittest.TestCase):
         self.assertEqual(events[-1]["timings"]["predicted_per_second"], 8)
         with urllib.request.urlopen(base + "/metrics?requests=all") as response:
             metrics = json.load(response)
+        self.assertEqual(metrics["api"], {"host": "127.0.0.1", "port": server.server_port, "authentication": "none"})
         self.assertEqual(metrics["engine"]["expert_slots"], 12)
         self.assertEqual(metrics["live"]["state"], "idle")
         self.assertEqual(metrics["requests"][0]["reused"], 4)

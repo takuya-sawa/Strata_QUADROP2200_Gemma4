@@ -47,7 +47,13 @@ test('host controls accept only the explicitly configured LAN origin', async t =
   const env = { ...process.env, STRATA_HOME: home, STRATA_MODELS_DIR: join(home, 'm'), STRATA_PORT: String(port), STRATA_BIND: '127.0.0.1', STRATA_WEB_LAN_ORIGIN: origin };
   const child = spawn(process.execPath, ['server/index.mjs'], { cwd, env });
   let err = ''; child.stderr.on('data', d => { err += d; });
-  t.after(async () => { child.kill(); await new Promise(resolve => child.once('exit', resolve)); rmSync(home, { recursive: true, force: true }); });
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill();
+      await new Promise(resolve => child.once('exit', resolve));
+    }
+    rmSync(home, { recursive: true, force: true });
+  });
   let up = false;
   for (let i = 0; i < 300 && !up; i++) { try { up = (await fetch(`${base}/api/health`)).ok; } catch { await new Promise(r => setTimeout(r, 100)); } }
   assert.ok(up, 'the host answers: ' + err.slice(-400));

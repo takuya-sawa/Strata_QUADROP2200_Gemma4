@@ -100,6 +100,24 @@ export async function pollExternalMetrics() {
     externalPolling = false;
   }
 }
+
+export function externalApiBaseUrl(raw, api, hostUrl) {
+  if (!api || typeof api.host !== 'string' || !Number.isInteger(api.port) || api.port < 1 || api.port > 65535) return null;
+  try {
+    const url = new URL(raw);
+    if (!['http:', 'https:'].includes(url.protocol)) return null;
+    url.username = ''; url.password = ''; url.search = ''; url.hash = '';
+    const loopback = ['127.0.0.1', 'localhost', '[::1]'];
+    if (loopback.includes(url.hostname) && Number(url.port || (url.protocol === 'https:' ? 443 : 80)) === api.port &&
+        ['0.0.0.0', '::'].includes(api.host)) {
+      const host = new URL(hostUrl);
+      if (!loopback.includes(host.hostname)) url.hostname = host.hostname;
+    }
+    return url.toString().replace(/\/+$/, '');
+  } catch {
+    return null;
+  }
+}
 let systemReading=null;
 /* CPU and SSD temperatures (null where this PC cannot give one) and the GPU energy used since the host started (#3628). */
 let temperatures={cpuTempC:null,ssdTempC:null};
@@ -288,6 +306,8 @@ export function snapshot() {
       configuredModelId: modelParts.join(':'),
       modelId: typeof externalMetrics?.engine?.model === 'string' ? externalMetrics.engine.model : null,
       connected: !!externalMetrics,
+      apiBaseUrl: externalApiBaseUrl(process.env.STRATA_SERVER_URL, externalMetrics?.api, servingState().localUrl),
+      authentication: externalMetrics?.api?.authentication === 'none' ? 'none' : null,
     };
   }
   const dashboard = engine.running&&engineMetrics.source==='engine'&&engineMetrics.dashboard ? engineMetrics.dashboard : externalMetrics;
