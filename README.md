@@ -58,7 +58,17 @@ CPU-only and slower. Live usage: GPU **4,696 / 5,120 MiB** at 34 °C, 11,712 MiB
 
 ## Measured speed (this machine)
 
-Measured by sending real requests to `http://localhost:8089` (2026-11-18, Strata 0.1.59.1).
+Retested on 2026-11-25 through the running `http://localhost:8089/v1` API: Quadro P2200, Gemma 4 26B-A4B Q4_0, Strata 0.1.59.1, one request at a time, temperature 0. The model was already loaded; rates and prompt times are from the API's `timings`.
+
+| Situation | Measured |
+| --- | --- |
+| 100 output tokens from short prompts, 6 runs | **Median 10.25 tokens/s** (range 6.7-11.6; median 11.1 for the last 3) |
+| 1,898 input tokens, 1,894 freshly processed | **67.62 s, 28.0 tokens/s** |
+| Repeat the same input, 1,897 tokens reused from KV cache | **0.092 s** to process fresh input |
+
+The short test uses the three prompts in [`tools/ab_engine.py`](tools/ab_engine.py) twice each; the long test uses `long_prompt(1861)` from that file. The long test ran once after the short tests; it was not a cold OS/model-load test. The repeat is the same input, not a continued conversation. Speed varies with load and warm-up.
+
+**Previous measurements: 2026-11-18** (the API then used `:8088`, Strata 0.1.59.1):
 
 | Situation | Measured |
 | --- | --- |
@@ -68,6 +78,8 @@ Measured by sending real requests to `http://localhost:8089` (2026-11-18, Strata
 | Follow-up over an already-read 32,280-token prefix (KV cache reuse) | **0.34-0.37 s** |
 | Output in the middle of a long conversation | **3.1 tokens/s** |
 | First read of 32,000 input tokens (nothing cached) | **about 4,640 s (77 minutes)** |
+
+The new short-prompt median exceeds the earlier 8.3-8.5 tokens/s, and the roughly 1,900-token prompt took less time than the earlier 87.1 s. The old prompts and load cannot be confirmed identical, however, so this is not a controlled A/B comparison or a reliable improvement percentage. Long-conversation and 32k-input figures were not retested.
 
 So this is not a fork that makes Strata fast. It is a fork that makes it **run at all, locally, on hardware the upstream guides treat as
 unsupported** (see [docs/OLDER_GPUS.md](docs/OLDER_GPUS.md)). Upstream speed numbers for RTX 5070 / RTX 3060 cards are in
