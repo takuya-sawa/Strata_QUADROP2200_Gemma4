@@ -1,7 +1,7 @@
 > [!NOTE]
 > **Dieses Repository ist eine Abspaltung (Fork) von [Niko1221/Strata](https://github.com/Niko1221/Strata) (MIT), nicht das Projekt selbst.** Es ist
 > der Build eines einzelnen alten Desktops: **Intel Core i5-3470 (4 Kerne, kein AVX2) · 16 GB RAM · NVIDIA Quadro P2200 5 GB** (sm_61, Link läuft
-> mit PCIe Gen1 x16), der **Gemma 4 26B-A4B** als OpenAI-kompatiblen Server auf `http://localhost:8088` bereitstellt. Modelle, Installateure,
+> mit PCIe Gen1 x16), der **Gemma 4 26B-A4B** als OpenAI-kompatiblen Server auf `http://localhost:8089` bereitstellt. Modelle, Installateure,
 > Hardware-Guides und Support des Originals liegen bei **[Niko1221/Strata](https://github.com/Niko1221/Strata)**. Ausführlicher Leitfaden (Japanisch):
 > **[docs/P2200_GEMMA4.md](docs/P2200_GEMMA4.md)**. Diese Seite beschreibt nur den Rechner dieses Forks; die Original-Guides liegen weiter im Baum:
 > [docs/README.md](docs/README.md), [docs/MODELS.md](docs/MODELS.md), [docs/CAPABILITIES.md](docs/CAPABILITIES.md), [docs/INSTALL.md](docs/INSTALL.md), [docs/OLDER_GPUS.md](docs/OLDER_GPUS.md).
@@ -53,7 +53,7 @@ Das Modell **passt weder in 5 GB VRAM noch in 16 GB RAM**. Es läuft, weil die M
 
 ## Gemessene Geschwindigkeit (dieser Rechner)
 
-Gemessen mit echten Anfragen an `http://localhost:8088` (2026-11-18, Strata 0.1.59.1).
+Gemessen mit echten Anfragen an `http://localhost:8089` (2026-11-18, Strata 0.1.59.1).
 
 | Situation | Gemessen |
 | --- | --- |
@@ -88,9 +88,9 @@ cmake --build build-local-p2200 -j4
 
 | Adresse | Was es ist |
 | --- | --- |
-| `http://localhost:8088/` | Chat-Seite |
-| `http://localhost:8088/monitor` | Live-Seite mit GPU, laufender Anfrage, Geschwindigkeit und Verlauf (`/status` liefert dasselbe als JSON) |
-| `http://localhost:8088/v1/chat/completions` | OpenAI-kompatible API (`stream`, `tools`); `/v1/models` antwortet `gemma-4-26b-a4b` |
+| `http://localhost:8089/` | Chat-Seite |
+| `http://127.0.0.1:8088/#/monitor` | Monitor der Web-Oberfläche (`./strata-web.sh`); Engine-Metriken: `http://localhost:8089/metrics` |
+| `http://localhost:8089/v1/chat/completions` | OpenAI-kompatible API (`stream`, `tools`); `/v1/models` antwortet `gemma-4-26b-a4b` |
 
 **Es gibt keine Authentifizierung**, der Server lauscht auf `0.0.0.0` - nur in einem vertrauenswürdigen Netz benutzen; für einen rein lokalen Server `python3 tools/gemma4_server.py` mit `--host 127.0.0.1` starten. Anfragen werden nacheinander behandelt (ein einziger KV-Cache). Bilder gehen nur, wenn `mmproj-gemma-4-26B*.gguf` neben der Modelldatei liegt.
 
@@ -110,7 +110,7 @@ Diesen Eintrag benutzt dieser Rechner wirklich in `chatLanguageModels.json` (Ein
     {
       "id": "gemma-4-26b-a4b",
       "name": "(Quadro) Gemma 4 26B-A4B",
-      "url": "http://localhost:8088/v1",
+      "url": "http://localhost:8089/v1",
       "toolCalling": true,
       "vision": true,
       "maxInputTokens": 122880,

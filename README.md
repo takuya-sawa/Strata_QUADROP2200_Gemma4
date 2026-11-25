@@ -2,7 +2,7 @@
 > **This repository is a fork of [Niko1221/Strata](https://github.com/Niko1221/Strata) (MIT), not the upstream project.**
 > **このリポジトリは [Niko1221/Strata](https://github.com/Niko1221/Strata) のフォークです。** It is one old desktop machine's build of
 > Strata: **Intel Core i5-3470 (4 cores, no AVX2) · 16 GB RAM · NVIDIA Quadro P2200 5 GB (sm_61, running at PCIe Gen1 x16)**, serving
-> **Gemma 4 26B-A4B** as an OpenAI-compatible server on `http://localhost:8088`. Upstream Strata - its models, installers, hardware
+> **Gemma 4 26B-A4B** as an OpenAI-compatible server on `http://localhost:8089`. Upstream Strata - its models, installers, hardware
 > guides and support - is at **[Niko1221/Strata](https://github.com/Niko1221/Strata)**. Japanese: [README.ja.md](README.ja.md), full fork guide:
 > **[docs/P2200_GEMMA4.md](docs/P2200_GEMMA4.md)**.
 
@@ -58,7 +58,7 @@ CPU-only and slower. Live usage: GPU **4,696 / 5,120 MiB** at 34 °C, 11,712 MiB
 
 ## Measured speed (this machine)
 
-Measured by sending real requests to `http://localhost:8088` (2026-11-18, Strata 0.1.59.1).
+Measured by sending real requests to `http://localhost:8089` (2026-11-18, Strata 0.1.59.1).
 
 | Situation | Measured |
 | --- | --- |
@@ -95,11 +95,11 @@ cmake --build build-local-p2200 -j4
 
 | Endpoint | What it is |
 | --- | --- |
-| `http://localhost:8088/` | chat page |
-| `http://localhost:8088/monitor` | live page with GPU, running request, speed and history (`/status` returns the same as JSON) |
-| `http://localhost:8088/v1/chat/completions` | OpenAI-compatible API (`stream`, `tools`); `/v1/models` answers `gemma-4-26b-a4b` |
-| `http://localhost:8088/v1/status` | JSON the upstream Strata web UI uses to recognise the engine (`"service": "strata"`, context, vision, engine version) |
-| `http://localhost:8088/health` | liveness check (`{"status":"ok","service":"strata", ...}`) |
+| `http://localhost:8089/` | chat page |
+| `http://127.0.0.1:8088/#/monitor` | live monitor in the web UI (`./strata-web.sh`); engine metrics: `http://localhost:8089/metrics` |
+| `http://localhost:8089/v1/chat/completions` | OpenAI-compatible API (`stream`, `tools`); `/v1/models` answers `gemma-4-26b-a4b` |
+| `http://localhost:8089/v1/status` | JSON the upstream Strata web UI uses to recognise the engine (`"service": "strata"`, context, vision, engine version) |
+| `http://localhost:8089/health` | liveness check (`{"status":"ok","service":"strata", ...}`) |
 
 Requests without `max_tokens` (or `max_completion_tokens`) may generate up to `DEFAULT_MAX_TOKENS = 4096` tokens, clamped to the room left in the context.
 
@@ -111,16 +111,16 @@ authentication** and the server listens on `0.0.0.0`, so keep it on a trusted ne
 
 ## The upstream web UI
 
-`apps/host/` (the upstream Strata web UI) runs against this fork's engine on `:8088`:
+`apps/host/` (the upstream Strata web UI) runs against this fork's engine on `:8089`:
 
 ```bash
-./strata-web.sh          # → http://127.0.0.1:8791/  (prepares Node 24 and dist when missing)
+./strata-web.sh          # → http://127.0.0.1:8088/  (prepares Node 24 and dist when missing)
 ```
 
 Dismiss the setup modal with "Go straight to the app", then pick **"Gemma 4 26B-A4B"** under API models in the chat model
-picker (per chat). `inference · Strata engine` on the console is the healthy state; token stats are on
-`http://localhost:8088/monitor`. The UI listens on loopback only — reach it from another machine with
-`ssh -L 8791:localhost:8791 <this PC>`. Full steps and caveats: [docs/P2200_GEMMA4.md](docs/P2200_GEMMA4.md#web-ui).
+picker (per chat). `inference · Strata engine` on the console is the healthy state; token stats are in the
+Monitor tab at `http://127.0.0.1:8088/#/monitor`. The UI listens on loopback only — reach it from another machine with
+`ssh -L 8088:localhost:8088 <this PC>`. Full steps and caveats: [docs/P2200_GEMMA4.md](docs/P2200_GEMMA4.md#web-ui).
 
 <a id="vs-code"></a>
 
@@ -138,7 +138,7 @@ This is the entry this machine actually uses in `chatLanguageModels.json` (Setti
     {
       "id": "gemma-4-26b-a4b",
       "name": "(Quadro) Gemma 4 26B-A4B",
-      "url": "http://localhost:8088/v1",
+      "url": "http://localhost:8089/v1",
       "toolCalling": true,
       "vision": true,
       "maxInputTokens": 122880,
@@ -160,7 +160,7 @@ OpenAI-compatible, so Claude Code, Codex CLI, OpenCode and similar tools work to
 
 - [`gemma4-server.sh`](gemma4-server.sh) - the launcher used on this machine (repository root).
 - [`strata-web.sh`](strata-web.sh) - starts the upstream web UI (`apps/host/`) against the engine above; prepares Node 24, `dist` and the chat model connection.
-- [`tools/gemma4_server.py`](tools/gemma4_server.py) - the Gemma 4 HTTP server: OpenAI API, monitor page, tokenizer, chat template. Not in upstream.
+- [`tools/gemma4_server.py`](tools/gemma4_server.py) - the Gemma 4 HTTP server: OpenAI API, monitor metrics, tokenizer, chat template. Not in upstream.
 - [`docs/P2200_GEMMA4.md`](docs/P2200_GEMMA4.md) - the Japanese guide for this machine: environment, build flags, startup, troubleshooting.
 - Gemma 4 code in `src/gemma4/` and `include/strata/gemma4/`, plus `tools/gemma4_*` helpers and `data/dsv41/`.
 - `build-local-p2200/` (gitignored) and the 15 GB of weights in `~/models/` (`/models/` is gitignored) - never committed.

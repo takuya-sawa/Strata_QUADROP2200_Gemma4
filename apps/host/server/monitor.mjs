@@ -59,6 +59,7 @@ const state = {
 let hubRef = null;
 let hwCache = null;
 let ticker = null;
+let externalMetrics = null, externalPolling = false, externalPollCount = 0, externalPollAt = 0, externalWarning = false;
 let memoryWarningShown = false;
 let sensorsPending = false, sensorsAt = 0;
 /* The Monitor screen asks (GET /api/monitor) every few seconds while it is open; a model that is loaded counts as live (#4066). */
@@ -74,6 +75,31 @@ export function watch() {
   if (wasIdle) sensorsAt = 0;                                    // opening the Monitor after a quiet spell reads the card at once
 }
 export function setLiveProbe(probe) { liveProbe = typeof probe === 'function' ? probe : () => false; }
+
+export async function pollExternalMetrics() {
+  const raw = process.env.STRATA_SERVER_URL?.trim().replace(/\/+$/, '');
+  if (!raw || externalPolling) return;
+  externalPolling = true;
+  const full = externalPollCount++ % 10 === 0;
+  try {
+    const base = raw.replace(/\/v1$/, '');
+    const response = await fetch(`${base}/metrics${full ? '?requests=all' : ''}`, { signal: AbortSignal.timeout(1500) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const fresh = await response.json();
+    if (!fresh?.engine || !fresh?.live || !Array.isArray(fresh.requests)) throw new Error('Unrecognized metrics');
+    const older = externalMetrics?.requests, recent = fresh.requests;
+    externalMetrics = full || !Array.isArray(older) || !recent.length ? fresh : {
+      ...fresh, requests: [...recent, ...older.filter(r => Number(r.time) < Math.min(...recent.map(x => Number(x.time))))].slice(0, 500),
+    };
+    externalWarning = false;
+  } catch (error) {
+    externalMetrics = null;
+    if (!externalWarning) console.warn(`External engine monitor unavailable: ${error.message}`);
+    externalWarning = true;
+  } finally {
+    externalPolling = false;
+  }
+}
 let systemReading=null;
 /* CPU and SSD temperatures (null where this PC cannot give one) and the GPU energy used since the host started (#3628). */
 let temperatures={cpuTempC:null,ssdTempC:null};
@@ -121,6 +147,7 @@ export function init(hub, hardware) {
   if (ticker) clearInterval(ticker);
   ticker = setInterval(tick, 1000);
   ticker.unref?.();
+  if (process.env.STRATA_SERVER_URL?.trim()) void pollExternalMetrics();
 }
 
 function approach(current, target, factor = 0.22) {
@@ -128,7 +155,11 @@ function approach(current, target, factor = 0.22) {
 }
 
 function tick() {
-  const pace=sensorPace({live:supervisor.status().running||!!liveProbe(),watchedUntil});
+  const pace=sensorPace({live:supervisor.status().running||!!liveProbe()||['reading','generating'].includes(externalMetrics?.live?.state),watchedUntil});
+  if (process.env.STRATA_SERVER_URL?.trim() && Date.now() - externalPollAt >= 2000) {
+    externalPollAt = Date.now();
+    void pollExternalMetrics();
+  }
   if(!sensorsPending&&Date.now()-sensorsAt>=pace.intervalMs){
     sensorsPending=true;sensorsAt=Date.now();
     const hardware=cachedHardware()??hwCache;
@@ -250,7 +281,8 @@ export function snapshot() {
       logCount: engine.logCount,
     },
   };
-  return engine.running&&engineMetrics.source==='engine'&&engineMetrics.dashboard?originalDashboard(engineMetrics.dashboard,cachedHardware()??hwCache,result):result;
+  const dashboard = engine.running&&engineMetrics.source==='engine'&&engineMetrics.dashboard ? engineMetrics.dashboard : externalMetrics;
+  return dashboard ? originalDashboard(dashboard,cachedHardware()??hwCache,result) : result;
 }
 
 export function setContextMax(max) {

@@ -59,6 +59,11 @@ test('Monitor keeps per-model requests/context separate and host RAM readings sh
  const all=scopedMonitor(live,service.state(),'all',requests);assert.equal(all.context.maxTokens,0);assert.equal(all.totals.requests,2);assert.equal(all.totals.tokensOut,23);
 });
 
+test('Monitor retains external engine request history when no local instance is loaded',()=>{
+ const live={telemetry:{throughput:'engine'},requests:[{id:'external'}]};
+ assert.equal(scopedMonitor(live,{mode:'real',instances:[]},'all',[]).requests[0].id,'external');
+});
+
 test('changed settings reload only the matching instance and keep its routing identity',()=>{
  const {service,load,setLog}=fixture();const a=load(['gpu-a']).instance,b=load(['gpu-b']).instance;
  const changed={...config,beginner:{contextLength:'64k'}};

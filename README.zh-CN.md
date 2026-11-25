@@ -1,7 +1,7 @@
 > [!NOTE]
 > **这个仓库是 [Niko1221/Strata](https://github.com/Niko1221/Strata) (MIT) 的分支 (fork)，不是本项目本身。** 它是在一台旧的台式机上构建的 Strata:
 > **Intel Core i5-3470 (4 核、无 AVX2) · 16 GB 内存 · NVIDIA Quadro P2200 5 GB** (sm_61、实际链路 PCIe Gen1 x16), 把 **Gemma 4 26B-A4B** 作为
-> OpenAI 兼容服务器运行在 `http://localhost:8088`。本家的模型、安装程序、硬件指南和支持都在 **[Niko1221/Strata](https://github.com/Niko1221/Strata)**。
+> OpenAI 兼容服务器运行在 `http://localhost:8089`。本家的模型、安装程序、硬件指南和支持都在 **[Niko1221/Strata](https://github.com/Niko1221/Strata)**。
 > 完整指南 (日语): **[docs/P2200_GEMMA4.md](docs/P2200_GEMMA4.md)**。本页面只描述这个分支的机器; 本家指南在这个代码树里也保留着:
 > [docs/README.md](docs/README.md), [docs/MODELS.md](docs/MODELS.md), [docs/CAPABILITIES.md](docs/CAPABILITIES.md), [docs/INSTALL.md](docs/INSTALL.md), [docs/OLDER_GPUS.md](docs/OLDER_GPUS.md).
 
@@ -52,7 +52,7 @@
 
 ## 实测速度 (这台机器)
 
-向 `http://localhost:8088` 实际发送请求测出的数值 (2026-11-18、Strata 0.1.59.1)。
+向 `http://localhost:8089` 实际发送请求测出的数值 (2026-11-18、Strata 0.1.59.1)。
 
 | 情况 | 实测 |
 | --- | --- |
@@ -87,9 +87,9 @@ cmake --build build-local-p2200 -j4
 
 | 地址 | 内容 |
 | --- | --- |
-| `http://localhost:8088/` | 聊天页面 |
-| `http://localhost:8088/monitor` | 显示 GPU、正在处理的请求、速度和历史的实时页面 (`/status` 是同样内容的 JSON) |
-| `http://localhost:8088/v1/chat/completions` | OpenAI 兼容 API (`stream`、`tools`); `/v1/models` 返回 `gemma-4-26b-a4b` |
+| `http://localhost:8089/` | 聊天页面 |
+| `http://127.0.0.1:8088/#/monitor` | Web 界面的监视器（用 `./strata-web.sh` 启动）；引擎指标：`http://localhost:8089/metrics` |
+| `http://localhost:8089/v1/chat/completions` | OpenAI 兼容 API (`stream`、`tools`); `/v1/models` 返回 `gemma-4-26b-a4b` |
 
 **没有身份验证**, 服务器监听 `0.0.0.0`, 所以只在可信网络中使用; 只想本机可用时给 `python3 tools/gemma4_server.py` 加 `--host 127.0.0.1`。请求一次只处理一个 (只有一个 KV 缓存)。图片只在模型旁边有 `mmproj-gemma-4-26B*.gguf` 时可用。
 
@@ -109,7 +109,7 @@ cmake --build build-local-p2200 -j4
     {
       "id": "gemma-4-26b-a4b",
       "name": "(Quadro) Gemma 4 26B-A4B",
-      "url": "http://localhost:8088/v1",
+      "url": "http://localhost:8089/v1",
       "toolCalling": true,
       "vision": true,
       "maxInputTokens": 122880,

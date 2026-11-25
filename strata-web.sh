@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
-# Strata の Web 画面 (apps/host) をこの PC で起動する: http://127.0.0.1:8791/ (認証なし・loopback 限定)。
-# 会話の答えは tools/gemma4_server.py (:8088) の Gemma 4 26B-A4B から返ります (:8088 が空いていれば一緒に起動します)。
+# Strata の Web 画面 (apps/host): http://127.0.0.1:8088/ (認証なし・loopback 限定)。
+# 会話のエンジンは :8089 で動きます。
 # 設定は環境変数で上書きできる:
-#   PORT=8791 ENGINE_PORT=8088 MAX_CONTEXT=131072 STRATA_BIND=127.0.0.1 ./strata-web.sh
-# 上から叩く (Windows などから) ときは SSH ポートフォワードで: ssh -L 8791:localhost:8791 <このPC>
+#   PORT=8088 ENGINE_PORT=8089 MAX_CONTEXT=131072 STRATA_BIND=127.0.0.1 ./strata-web.sh
+# Windows などからは SSH ポートフォワードで: ssh -L 8088:localhost:8088 <このPC>
 cd "$(dirname "$0")" || exit 1
 
 SCRIPT_DIR=$PWD
 HOST_DIR=$SCRIPT_DIR/apps/host
-PORT=${PORT:-8791}
+PORT=${PORT:-8088}
 BIND=${STRATA_BIND:-127.0.0.1}
-ENGINE_PORT=${ENGINE_PORT:-8088}
+ENGINE_PORT=${ENGINE_PORT:-8089}
 MAX_CONTEXT=${MAX_CONTEXT:-131072}
 MODEL=${MODEL:-$HOME/models/gemma-4-26B_q4_0-it.gguf}
+if [ "$PORT" = "$ENGINE_PORT" ]; then
+  echo "Web 画面とエンジンには別々のポートが必要です。" >&2
+  exit 1
+fi
 NODE_VERSION=node-v24.22.3-linux-x64
 NODE_HOME=${NODE_HOME:-$HOME/.local/node}
 
@@ -41,7 +45,7 @@ if [ ! -d "$HOST_DIR/node_modules" ]; then
   ( cd "$HOST_DIR" && npm ci ) || exit 1
 fi
 
-# --- 会話のエンジン (:8088) ---
+# --- 会話のエンジン (:8089) ---
 engine_up() { curl -fsS --max-time 5 "http://127.0.0.1:$ENGINE_PORT/health" >/dev/null 2>&1; }
 ENGINE_PID=""
 if ! engine_up; then
@@ -67,7 +71,7 @@ export STRATA_PORT=$PORT
 export STRATA_BIND=$BIND
 CONNECTION_ID=${CONNECTION_ID:-p2200-gemma4}
 MODEL_ID=${MODEL_ID:-gemma-4-26b-a4b}
-export STRATA_TASK_REMOTE_MODEL=$CONNECTION_ID:$MODEL_ID   # タスク/エージェント会話も :8088 のモデルで動かす
+export STRATA_TASK_REMOTE_MODEL=$CONNECTION_ID:$MODEL_ID
 
 # 会話に選ぶモデルの接続 (~/.strata/data/model-providers.json)。無いときだけ作成します。
 PROVIDERS_FILE=$HOME/.strata/data/model-providers.json
@@ -92,6 +96,23 @@ if [ ! -f "$PROVIDERS_FILE" ]; then
 JSON
   chmod 600 "$PROVIDERS_FILE"
   echo "接続を作成しました: $PROVIDERS_FILE (会話のモデルピッカーに '$MODEL_ID' が出ます)"
+else
+  # 旧ランチャーの既定接続だけを移行し、他の接続や変更済み URL はそのまま残す。
+  node - "$PROVIDERS_FILE" "$CONNECTION_ID" "$ENGINE_PORT" <<'NODE' || exit 1
+const fs = require('node:fs');
+const [file, id, port] = process.argv.slice(2);
+const connections = JSON.parse(fs.readFileSync(file, 'utf8'));
+if (!Array.isArray(connections)) throw new Error('Invalid model providers file');
+const connection = connections.find(c => c.id === id && c.kind === 'custom' &&
+  c.protocol === 'openai-chat' && /^http:\/\/(127\.0\.0\.1|localhost):8088\/v1\/?$/.test(c.baseUrl));
+if (connection) {
+  connection.baseUrl = `http://127.0.0.1:${port}/v1`;
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(connections, null, 2) + '\n', { mode: fs.statSync(file).mode & 0o777, flag: 'wx' });
+  fs.renameSync(tmp, file);
+  console.log(`旧 Gemma 接続をエンジンのポート ${port} に移行しました。`);
+}
+NODE
 fi
 
 # 終了ときはエンジンに SIGINT (サーバー自身がエンジン子プロセスを片付ける) → 効かなければ SIGTERM/KILL。

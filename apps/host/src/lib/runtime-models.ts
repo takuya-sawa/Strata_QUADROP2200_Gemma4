@@ -10,7 +10,7 @@ export function scopedMonitor(live:MonitorState|null,runtime:RuntimeModels|null,
   const entries=selected?[selected]:runtime.instances;
   const ids=new Set(entries.map(i=>i.id));
   const log=selected?requests.filter(r=>r.instanceId===selected.id):requests;
-  if(runtime.mode==='real')return {...live,requests:log};
+  if(runtime.mode==='real')return runtime.instances.length===0&&live.telemetry?.throughput==='engine'?live:{...live,requests:log};
   const current=entries.find(i=>['generating','thinking'].includes(i.phase))??entries.find(i=>i.phase==='reading');
   const done=log.filter(r=>r.state==='done');
   const phase=current?.phase??'idle';

@@ -31,7 +31,7 @@ Strata 本家の使い方・対応環境は [README](../README.md) と [ガイ�
 
 ## 速度 (このマシンで実測)
 
-`http://localhost:8088` に実際に投げて測った値です (2026-11-18、Strata 0.1.59.1)。
+当時のエンジン API (`http://localhost:8088`) に実際に投げて測った値です (2026-11-18、Strata 0.1.59.1)。現在のエンジン API は既定で `:8089` です。
 
 | 状況 | 実測 |
 | --- | --- |
@@ -102,7 +102,7 @@ cmake --build build-local-p2200 -j4
 ```bash
 MODEL=~/models/gemma-4-26B_q4_0-it.gguf \
 STRATA=build-local-p2200/strata \
-PORT=8088 \
+PORT=8089 \
 MAX_CONTEXT=131072 \
 ./gemma4-server.sh
 ```
@@ -111,13 +111,14 @@ MAX_CONTEXT=131072 \
 
 | 場所 | 内容 |
 | --- | --- |
-| `http://localhost:8088/` | チャットページ |
-| `http://localhost:8088/monitor` | GPU・実行中リクエスト・速度・履歴のライブページ |
-| `http://localhost:8088/status` | 同じ内容を JSON で |
-| `http://localhost:8088/v1/models` | `gemma-4-26b-a4b` (`modalities.input` に `text` と `image` を公言) |
-| `http://localhost:8088/v1/chat/completions` | OpenAI 互換 API (`stream`・`tools` 対応) |
-| `http://localhost:8088/v1/status` | Strata の Web 画面がエンジンを識別するために使う JSON (`"service": "strata"`・コンテキスト・vision・エンジン版)。本家の `strata` 引擎と同じ形 |
-| `http://localhost:8088/health` | 生きているかの確認 (`{"status":"ok","service":"strata", ...}`) |
+| `http://localhost:8089/` | チャットページ |
+| `http://127.0.0.1:8088/#/monitor` | Web 画面の Monitor (別途 `./strata-web.sh` を起動) |
+| `http://localhost:8089/metrics` | Web 画面の Monitor 用 JSON |
+| `http://localhost:8089/status` | サーバーの状態を JSON で |
+| `http://localhost:8089/v1/models` | `gemma-4-26b-a4b` (`modalities.input` に `text` と `image` を公言) |
+| `http://localhost:8089/v1/chat/completions` | OpenAI 互換 API (`stream`・`tools` 対応) |
+| `http://localhost:8089/v1/status` | Strata の Web 画面がエンジンを識別するために使う JSON (`"service": "strata"`・コンテキスト・vision・エンジン版)。本家の `strata` 引擎と同じ形 |
+| `http://localhost:8089/health` | 生きているかの確認 (`{"status":"ok","service":"strata", ...}`) |
 
 リクエストに `max_tokens` (または `max_completion_tokens`) を入れない場合、出力は `DEFAULT_MAX_TOKENS = 4096` まで伸びます (古い 512 固定だと Web 画面の回答が途中で切れていました)。空きが足りないときは `max_context - 入力` に自動で絞られます。
 
@@ -125,7 +126,7 @@ MAX_CONTEXT=131072 \
 
 ```bash
 python3 tools/gemma4_server.py ~/models/gemma-4-26B_q4_0-it.gguf \
-  --strata build-local-p2200/strata --host 127.0.0.1 --port 8088
+  --strata build-local-p2200/strata --host 127.0.0.1 --port 8089
 ```
 
 `gemma4_server.py` が知らない引数はエンジンにそのまま渡ります (`--no-gpu`、`--kv-type` など)。
@@ -144,7 +145,7 @@ VS Code では `chatLanguageModels.json` (Setting: **Language Models: Chat Langu
     {
       "id": "gemma-4-26b-a4b",
       "name": "(Quadro) Gemma 4 26B-A4B",
-      "url": "http://localhost:8088/v1",
+      "url": "http://localhost:8089/v1",
       "toolCalling": true,
       "vision": true,
       "maxInputTokens": 122880,
@@ -162,19 +163,19 @@ OpenAI 互換なので、Claude Code・Codex CLI・OpenCode などからも使�
 
 ## 5. 本家の Web 画面 (Strata アプリの UI)
 
-本家 Strata の Web 画面 [`apps/host/`](../apps/host) を、このフォークの実エンジン (上の `:8088`) に接続して使えます。起動はリポジトリ直下の [`strata-web.sh`](../strata-web.sh) 一つです:
+本家 Strata の Web 画面 [`apps/host/`](../apps/host) を、このフォークの実エンジン (上の `:8089`) に接続して使えます。起動はリポジトリ直下の [`strata-web.sh`](../strata-web.sh) 一つです:
 
 ```bash
-./strata-web.sh          # → http://127.0.0.1:8791/
+./strata-web.sh          # → http://127.0.0.1:8088/
 ```
 
 `PORT=` `ENGINE_PORT=` `MODEL=` `MAX_CONTEXT=` で上書きできます。スクリプトがやっていること:
 
 1. **Node 24 を用意する** — `apps/host` は Node >= 24.12 を要求します。リポジトリに pinned 版 ([`.node/node-v24.22.3-linux-x64.tar.xz`](../.node)) が入っているので、`~/.local/node/` に展開して使います (システムの Node が 24 以上ならそれを使います)。
 2. **`dist` (UI のビルド成果物) が無いとき `npm ci && npm run build`** — `node_modules` が無いときも `npm ci`。`apps/host/dist/` と `node_modules/` は gitignore 済みなので、クローン後はここで生成するか、ビルド済みのコピーを置いてください。
-3. **`:8088` が空いていれば `gemma4-server.sh` を裏で起動** (起動完了まで最大 240 秒待ち、終了時に一緒に止めます)。空いている場合は既存のサーバーを使い、`GET /v1/status` が無い古いコードなら警告を出します。
-4. **エンジンを「Strata のエンジン」として認識させる** — `STRATA_REAL_ENGINE=1` と `STRATA_SERVER_URL=http://127.0.0.1:8088/v1` を渡します。Web 画面は起動時に `GET /v1/status` を叩き、`"service": "strata"` が返ることでエンジンを識別します (ここが本家 UI とこのフォークのエンジンを繋ぐ要です)。コンソールに `inference · Strata engine` と出れば成功で、`simulated` ならエンジンを見ていません。
-5. **会話用のモデル接続を作成** — `~/.strata/data/model-providers.json` (0600) に `custom` / `openai-chat` の接続 `p2200-gemma4` → `http://127.0.0.1:8088/v1` の `gemma-4-26b-a4b` を入れます (ファイルが存在するときは触りません)。UI 側では API モデルとして扱われ、会話の送信はこの接続経由で `:8088` に届きます。
+3. **`:8089` が空いていれば `gemma4-server.sh` を裏で起動** (起動完了まで最大 240 秒待ち、終了時に一緒に止めます)。使用中の場合は既存のサーバーを使い、`GET /v1/status` が無い古いコードなら警告を出します。
+4. **エンジンを「Strata のエンジン」として認識させる** — `STRATA_REAL_ENGINE=1` と `STRATA_SERVER_URL=http://127.0.0.1:8089/v1` を渡します。Web 画面は起動時に `GET /v1/status` を叩き、`"service": "strata"` が返ることでエンジンを識別します (ここが本家 UI とこのフォークのエンジンを繋ぐ要です)。コンソールに `inference · Strata engine` と出れば成功で、`simulated` ならエンジンを見ていません。
+5. **会話用のモデル接続を作成** — `~/.strata/data/model-providers.json` (0600) に `custom` / `openai-chat` の接続 `p2200-gemma4` → `http://127.0.0.1:8089/v1` の `gemma-4-26b-a4b` を入れます。既存の旧既定接続 (`:8088/v1`) は移行し、それ以外の接続は変更しません。会話はこの接続経由で `:8089` に届きます。
 
 **初めての起動でやること** (セットアップのウィザードは、この構成ではモデルのダウンロードに進む必要がありません):
 
@@ -186,11 +187,11 @@ OpenAI 互換なので、Claude Code・Codex CLI・OpenCode などからも使�
 
 - Web 画面は **loopback 専用**です (`STRATA_BIND=127.0.0.1`)。`/api/*` は Origin が localhost 以外だと 403 になります。他の PC (Windows など) から開くときは SSH ポートフォワードを使います:
   ```bash
-  ssh -L 8791:localhost:8791 owner@192.168.1.10   # ブラウザで http://localhost:8791/
+  ssh -L 8088:localhost:8088 owner@192.168.1.10   # ブラウザで http://localhost:8088/
   ```
-- モデルピッカーの "API models" を使わず **ローカルモデル (ダウンロードして読み込む)** を選まないでください。ウェイトのダウンロード (66 GB) だけでなく、本家の読み込み経路は `llama-server` を起動しようとしてこのビルドでは失敗します。エンジンには必ず `:8088` の接続 (上の接続) 経由でつないでください。
-- Web 画面のトークン数 / tok/s 表示は `—` になります。`openai-chat` 接続では使用トークンが返されないためで、実際の速度とトークンは `http://localhost:8088/monitor` に見えます。
-- Web 画面が持つ OpenAI 互換 API (`/v1/...`) は Strata デスクトップの「他のデバイスに公開」設定が必要なため、外部ツール (VS Code など) は引き続き **`:8088` を直接**使ってください (上の「4.」)。
+- モデルピッカーの "API models" を使わず **ローカルモデル (ダウンロードして読み込む)** を選まないでください。ウェイトのダウンロード (66 GB) だけでなく、本家の読み込み経路は `llama-server` を起動しようとしてこのビルドでは失敗します。エンジンには必ず `:8089` の接続 (上の接続) 経由でつないでください。
+- GPU・速度・トークン数・履歴は Web 画面の **Monitor** タブ (`http://127.0.0.1:8088/#/monitor`) で確認できます。エンジンが報告しない項目は `—` で表示されます。
+- Web 画面が持つ OpenAI 互換 API (`/v1/...`) は Strata デスクトップの「他のデバイスに公開」設定が必要なため、外部ツール (VS Code など) は引き続き **`:8089` を直接**使ってください (上の「4.」)。
 - 本家の Web 画面に関する詳しい説明は [本家のガイド一覧](README.md) (`apps/host` の使い方) を参照してください。このセクションはこのマシン固有の接続方法だけを書きます。
 
 ## つまずいたとき
@@ -200,14 +201,14 @@ OpenAI 互換なので、Claude Code・Codex CLI・OpenCode などからも使�
 - エンジ子が起動しない (`the engine did not start`) → VRAM またはメモリが尽きています。他の GPU 利用プロセス (Strata デスクトップ、別のチャット) を閉じてください。`MAX_CONTEXT=32768` で下げると楽になります。
 - 画像が 400 になる → `mmproj-gemma-4-26B*.gguf` がモデルと同じ場所にあるか、`build-local-p2200/strata-gemma4-vision` があるか確認してください。
 - 全体的に遅い / スワップが増えていく → まずメモリ不足を疑ってください。`MAX_CONTEXT` を下げ、ブラウザなどを閉じ、`--no-gpu` は使わないでください。
-- Web 画面で `inference · simulated` となる / 「No model is loaded」が続く → エンジンが見てもらえていません。`curl http://127.0.0.1:8088/v1/status` が `"service":"strata"` を返すか確認し、返らないなら (古いコードで動いているサーバーを止めて) `./strata-web.sh` をもう一度実行してください。モデルピッカーで API の "Gemma 4 26B-A4B" が選ばれているかも確認してください。
-- Ctrl+C 後に GPU が空かない / `:8088` が塞がったまま → 古い `strata-gemma4` が残っています。`ps -C strata-gemma4` で PID を見て `kill <PID>` してください (GPU を掴んでいるかは `nvidia-smi` で確認できます)。
+- Web 画面で `inference · simulated` となる → エンジンが見てもらえていません。`curl http://127.0.0.1:8089/v1/status` が `"service":"strata"` を返すか確認し、返らないなら (古いコードで動いているサーバーを止めて) `./strata-web.sh` をもう一度実行してください。モデルピッカーで API の "Gemma 4 26B-A4B" が選ばれているかも確認してください。Monitor 上部の「モデルの読み込みなし」はアプリ管理のローカルモデルに関する表示で、API 接続のエンジン稼働を否定するものではありません。
+- Ctrl+C 後に GPU が空かない / `:8089` が塞がったまま → 古い `strata-gemma4` が残っています。`ps -C strata-gemma4` で PID を見て `kill <PID>` してください (GPU を掴んでいるかは `nvidia-smi` で確認できます)。
 - Web 画面の `/api/...` が 403 になる →Origin が localhost 以外から来ています (`STRATA_BIND` を変更したり、直接 IP で開いたりしていませんか)。loopback または `ssh -L` で開いてください。
 - トラブルの一般手順: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 
 ## このリポジトリにしかないもの
 
-- `tools/gemma4_server.py` — Gemma 4 用 HTTP サーバー (OpenAI 互換 API・モニタページ・トークナイザ・チャットテンプレート)。本家にはありません。
+- `tools/gemma4_server.py` — Gemma 4 用 HTTP サーバー (OpenAI 互換 API・モニター用メトリクス・トークナイザ・チャットテンプレート)。本家にはありません。
 - `gemma4-server.sh` — この環境の起動スクリプト。
 - `strata-web.sh` — 本家の Web 画面 (`apps/host/`) を上のエンジンに繋いで起動するスクリプト (上の「5.」)。
 - `apps/host/` — 本家から持ち込んだ Web 画面 (dist は gitignore 済みなので `npm ci && npm run build` で生成するか、ビルド済みのコピーを置いてください)。

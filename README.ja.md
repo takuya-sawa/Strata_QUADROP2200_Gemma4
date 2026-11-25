@@ -1,7 +1,7 @@
 > [!NOTE]
 > **このリポジトリは [Niko1221/Strata](https://github.com/Niko1221/Strata) (MIT) のフォークであり、本家そのものではありません。** 次の古いデスクトップ
 > 1 台向けに構築した Strata です: **Intel Core i5-3470 (4 コア・AVX2 なし)・メモリ 16 GB・NVIDIA Quadro P2200 5 GB (sm_61・実リンク PCIe Gen1 x16)** に、
-> **Gemma 4 26B-A4B** を OpenAI 互換サーバー `http://localhost:8088` として動かします。本家 Strata のモデル・インストーラー・対応ハードウェア・サポートは
+> **Gemma 4 26B-A4B** を OpenAI 互換サーバー `http://localhost:8089` として動かします。本家 Strata のモデル・インストーラー・対応ハードウェア・サポートは
 > **[Niko1221/Strata](https://github.com/Niko1221/Strata)** のものです。詳しくは **[docs/P2200_GEMMA4.md](docs/P2200_GEMMA4.md)**。
 
 <p align="center">
@@ -54,7 +54,7 @@
 
 ## 実測した速度 (このマシン)
 
-`http://localhost:8088` に実際に投げて測った値です (2026-11-18、Strata 0.1.59.1)。
+`http://localhost:8089` に実際に投げて測った値です (2026-11-18、Strata 0.1.59.1)。
 
 | 状況 | 実測 |
 | --- | --- |
@@ -89,9 +89,9 @@ cmake --build build-local-p2200 -j4
 
 | 場所 | 内容 |
 | --- | --- |
-| `http://localhost:8088/` | チャットページ |
-| `http://localhost:8088/monitor` | GPU・実行中リクエスト・速度・履歴のライブページ (`/status` は同じ内容を JSON で) |
-| `http://localhost:8088/v1/chat/completions` | OpenAI 互換 API (`stream`・`tools` 対応)・`/v1/models` は `gemma-4-26b-a4b` |
+| `http://localhost:8089/` | チャットページ |
+| `http://127.0.0.1:8088/#/monitor` | Web 画面の Monitor (`./strata-web.sh` で起動)。エンジンの値は `http://localhost:8089/metrics` |
+| `http://localhost:8089/v1/chat/completions` | OpenAI 互換 API (`stream`・`tools` 対応)・`/v1/models` は `gemma-4-26b-a4b` |
 
 画像は `mmproj-gemma-4-26B*.gguf` がモデルと同じ場所にあるときだけ動きます (ないと画像リクエストは 400)。**認証はありません** (`0.0.0.0` で待ち受けます)。信頼できるネットワークだけで使い、ローカルだけにしたいときは `python3 tools/gemma4_server.py` に `--host 127.0.0.1` を付けて起動してください。リクエストは KV キャッシュが 1 個なので 1 件ずつ処理されます。
 
@@ -101,13 +101,13 @@ cmake --build build-local-p2200 -j4
 
 ## 本家の Web 画面 (アプリの UI)
 
-本家 Strata の Web 画面 (`apps/host/`) を、上の `:8088` のエンジンに繋いで使えます。
+本家 Strata の Web 画面 (`apps/host/`) を、上の `:8089` のエンジンに繋いで使えます。
 
 ```bash
-./strata-web.sh          # → http://127.0.0.1:8791/  (Node 24 と dist が無いとき自動で用意します)
+./strata-web.sh          # → http://127.0.0.1:8088/  (Node 24 と dist が無いとき自動で用意します)
 ```
 
-セットアップのモーダルは **「すぐにアプリを使う」** で閉じ、会話のモデルピッカーの API models から **「Gemma 4 26B-A4B」** を選んでください (会話ごとに選ぶ)。コンソールに `inference · Strata engine` と出るのが正常な状態で、トークン数などの詳細な統計は `http://localhost:8088/monitor` に見えます。loopback 限定なので、他の PC からは `ssh -L 8791:localhost:8791 <このPC>` で開きます。手順と注意は [docs/P2200_GEMMA4.md](docs/P2200_GEMMA4.md#web-ui)。
+セットアップのモーダルは **「すぐにアプリを使う」** で閉じ、会話のモデルピッカーの API models から **「Gemma 4 26B-A4B」** を選んでください (会話ごとに選ぶ)。コンソールに `inference · Strata engine` と出るのが正常な状態で、詳細な統計は Web 画面の Monitor タブに表示されます。loopback 限定なので、他の PC からは `ssh -L 8088:localhost:8088 <このPC>` で開きます。手順と注意は [docs/P2200_GEMMA4.md](docs/P2200_GEMMA4.md#web-ui)。
 
 <a id="vs-code"></a>
 
@@ -125,7 +125,7 @@ cmake --build build-local-p2200 -j4
     {
       "id": "gemma-4-26b-a4b",
       "name": "(Quadro) Gemma 4 26B-A4B",
-      "url": "http://localhost:8088/v1",
+      "url": "http://localhost:8089/v1",
       "toolCalling": true,
       "vision": true,
       "maxInputTokens": 122880,
@@ -143,7 +143,7 @@ cmake --build build-local-p2200 -j4
 
 - [`gemma4-server.sh`](gemma4-server.sh) — この環境で使っている起動スクリプト (リポジトリ直下)。
 - [`strata-web.sh`](strata-web.sh) — 本家の Web 画面 (`apps/host/`) を上のエンジンに繋いで起動するスクリプト (Node 24・`dist`・接続設定をまとめて用意します)。
-- [`tools/gemma4_server.py`](tools/gemma4_server.py) — Gemma 4 用 HTTP サーバー (OpenAI 互換 API・モニタページ・トークナイザ・チャットテンプレート)。本家にはありません。
+- [`tools/gemma4_server.py`](tools/gemma4_server.py) — Gemma 4 用 HTTP サーバー (OpenAI 互換 API・モニター用メトリクス・トークナイザ・チャットテンプレート)。本家にはありません。
 - [`docs/P2200_GEMMA4.md`](docs/P2200_GEMMA4.md) — このマシンのガイド (動作環境・ビルドフラグ・起動・つまずいたとき)。
 - `src/gemma4/` と `include/strata/gemma4/` の Gemma 4 用のコード、`tools/gemma4_*` の補助ツール、`data/dsv41/`。
 - `build-local-p2200/` (gitignore 済み) と `~/models/` の約 15 GB のウェイト (`/models/` は gitignore 済み)。コミットしません。

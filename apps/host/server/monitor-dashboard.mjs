@@ -29,7 +29,7 @@ export function originalDashboard(raw, hardware, fallback) {
   const requests=(raw.requests??[]).map((r,i)=>({id:r.id??`engine-${r.time}-${i}`,at:new Date(r.time*1000).toISOString(),client:'Local engine',endpoint:'/chat/completions',state:r.finish==='error'?'error':'done',tokensIn:r.prompt_tokens??null,tokensOut:r.output_tokens??null,cachedTokens:r.reused??null,tps:r.decode_tok_s??null,promptTps:r.prompt_ms>0?Math.max(0,(r.prompt_tokens??0)-(r.reused??0))/(r.prompt_ms/1000):null,hitRate:r.hit_rate??null,pcieShare:r.pcie_share??null,durationMs:finite(r.duration_s)?r.duration_s*1000:0,finishReason:r.finish??null,usageSource:'reported',model:engine.model}));
   return {
     ...fallback,phase:live.state==='unloaded'?'idle':live.state,phaseLabel:live.state==='generating'?(live.phase??'Generating response'):live.state==='reading'?'Reading prompt':'Waiting for a request',
-    prompt:{done:live.prompt_read??0,total:live.prompt_total??0,pct:maxPct(live.prompt_read??0,live.prompt_total)},outputTps:live.tok_s??0,promptTps:live.prefill_tok_s_mean??0,
+    prompt:{done:live.prompt_read??null,total:live.prompt_total??0,pct:live.prompt_read==null?null:maxPct(live.prompt_read,live.prompt_total)},outputTps:live.tok_s??0,promptTps:live.prefill_tok_s_mean??null,
     generation:{done:live.generated??null,total:live.max_tokens??null},
     queue:{running:live.running??(['reading','generating'].includes(live.state)?1:0),waiting:live.queued??0},context:{usedTokens:used,maxTokens:maximum,pct:maxPct(used,maximum)},
     expertCache:{used:engine.expert_slots??0,total:engine.experts??0,memoryGb:finite(engine.expert_cache_mib)?engine.expert_cache_mib/1024:null,source:finite(engine.expert_slots)?'engine':'none'},

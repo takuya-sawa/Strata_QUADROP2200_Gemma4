@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """An HTTP server for Strata's Gemma 4 engine: an OpenAI-style chat API plus a small web page.
 
-    python3 tools/gemma4_server.py MODEL.gguf --strata build/strata [--host 0.0.0.0] [--port 8088]
+    python3 tools/gemma4_server.py MODEL.gguf --strata build/strata [--host 0.0.0.0] [--port 8089]
 
     GET  /                      the chat page
-    GET  /monitor               live status page (GPU, the running request, speed, history)
-    GET  /status                the same as JSON
+    GET  /metrics               the live readings Strata's web app Monitor shows (GPU, the running request, speed, history)
+    GET  /status                the same facts in this server's own shape, for curl
     GET  /v1/status             who this server is (Strata's host recognises it by "service": "strata")
     GET  /v1/models
     POST /v1/chat/completions   messages, max_tokens, temperature, top_p, top_k, stream
+
+The live monitor is Strata's web app (its Monitor tab reads GET /metrics); this server no longer serves a monitor page
+of its own.
 
 There is no authentication: bind it to a trusted network only.  The engine holds one conversation's KV cache, so requests
 are served one at a time (a second one waits for the first); a follow-up that starts with the same messages reuses it.
@@ -30,11 +33,23 @@ import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gemma4_chat_format import ChatTemplate, safe_prefix_len, split_tool_calls, strip_channels  # noqa: E402
 from gguf_reader import GGUFFile  # noqa: E402
 from strata_tokenizer import Tokenizer  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))   # the repository root: serve/ and strata_control/
+try:
+    from serve.telemetry import Telemetry  # noqa: E402  the hardware sampler behind GET /metrics
+except ImportError as _e:                 # without it the web app's Monitor falls back to the host's own sensors
+    Telemetry = None
+    print(f"metrics: no hardware sampler ({_e}); GET /metrics reports the engine's numbers only", flush=True)
+
+# The live tok/s window, as the original server computes it (serve/server.py's RATE_WINDOW_S / RATE_MIN_SPAN_S).
+RATE_WINDOW_S = 2.0
+RATE_MIN_SPAN_S = 0.25
 
 STOP_TOKENS = ("<eos>", "<turn|>", "<|tool_response>")   # the end of a turn; the tool's answer is the runtime's to write
 # What a reply may write when the request does not say: Strata's host sends no max_tokens of its own (its chat
@@ -47,7 +62,7 @@ PAGE = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=
 <style>body{font:16px system-ui;max-width:800px;margin:0 auto;padding:12px;display:flex;flex-direction:column;height:100vh;box-sizing:border-box}
 #log{flex:1;overflow:auto;white-space:pre-wrap}.u{color:#06c;margin-top:12px}.m{margin-top:4px}
 form{display:flex;gap:8px;margin-top:8px}textarea{flex:1;font:inherit;height:3.2em}</style>
-<h3>Gemma 4 26B-A4B (Strata) <small><a href="/monitor">monitor</a></small></h3><div id=log></div>
+<h3>Gemma 4 26B-A4B (Strata) <small>live readings: Strata's web app, its Monitor tab</small></h3><div id=log></div>
 <form id=f><textarea id=q placeholder="Enter: send / Shift+Enter: new line" autofocus></textarea><button>Send</button></form>
 <script>
 const log=document.getElementById('log'),q=document.getElementById('q');let msgs=[];
@@ -63,33 +78,6 @@ f.onsubmit=async e=>{e.preventDefault();const t=q.value.trim();if(!t)return;q.va
    if(l.startsWith('data: ')&&l!=='data: [DONE]'){const d=JSON.parse(l.slice(6)).choices[0].delta;
     if(d.content){out+=d.content;m.textContent=out;log.scrollTop=log.scrollHeight}}}}
  msgs.push({role:'assistant',content:out})};
-</script>"""
-
-
-MONITOR = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>Gemma 4 monitor</title>
-<style>body{font:15px system-ui;max-width:900px;margin:0 auto;padding:12px}h3{margin:14px 0 4px}
-table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ddd;padding:3px 8px;text-align:left}
-.bar{background:#eee;height:14px;border-radius:7px;overflow:hidden}.bar>i{display:block;height:100%;background:#06c}
-.busy{color:#c60;font-weight:bold}.idle{color:#080;font-weight:bold}a{color:#06c}</style>
-<h3>Gemma 4 26B-A4B (Strata) - monitor <small><a href="/">chat</a></small></h3>
-<div id=st></div><h3>GPU</h3><div id=gpu></div><h3>Server</h3><div id=srv></div>
-<h3>Recent requests</h3><table id=hist></table>
-<script>
-const f=(x,d=1)=>x==null?'-':Number(x).toFixed(d);
-async function tick(){try{const s=await (await fetch('/status')).json();
- const c=s.current;
- document.getElementById('st').innerHTML=c?`<span class=busy>BUSY</span> ${c.generated} tokens generated for a ${c.prompt_tokens}-token prompt,
-  ${f(c.elapsed,1)} s`+(c.tok_s?`, ${f(c.tok_s)} tok/s`:`, reading the prompt...`)+` (waiting: ${s.waiting})`:`<span class=idle>IDLE</span> (waiting: ${s.waiting})`;
- const g=s.gpu;document.getElementById('gpu').innerHTML=g?`${g.name}: ${g.mem_used} / ${g.mem_total} MiB
-  <div class=bar><i style="width:${100*g.mem_used/g.mem_total}%"></i></div>utilization ${g.util}%, ${g.temp} C`:'(nvidia-smi is not available)';
- document.getElementById('srv').innerHTML=`up ${f(s.uptime/3600,2)} h; requests ${s.requests} (errors ${s.errors}); prompt tokens ${s.prompt_tokens}, generated ${s.generated_tokens};
-  context ${s.context_used} / ${s.max_context} used by the last request<div class=bar><i style="width:${100*s.context_used/s.max_context}%"></i></div>
-  RAM free ${f(s.mem_available_mib,0)} MiB, load ${s.load.map(x=>f(x,2)).join(' ')}`;
- document.getElementById('hist').innerHTML='<tr><th>time<th>prompt<th>generated<th>prompt s<th>tok/s<th>finish</tr>'+s.history.map(h=>
-  `<tr><td>${new Date(h.finished*1000).toLocaleTimeString()}<td>${h.prompt_tokens}<td>${h.generated}<td>${f(h.prompt_s,1)}<td>${f(h.tok_s)}<td>${h.finish}</tr>`).join('');
-}catch(e){document.getElementById('st').textContent='(no answer from the server)'}}
-tick();setInterval(tick,1000);
 </script>"""
 
 
@@ -125,15 +113,35 @@ class Stats:
         self.context_used = 0
         self.current = None
         self.history = collections.deque(maxlen=20)
+        self.records = collections.deque(maxlen=500)
+        self.rate = collections.deque(maxlen=32)
+        self.totals = {"since": self.started, "requests": 0, "prompt_tokens": 0, "reused": 0,
+                       "output_tokens": 0, "prompt_ms": 0.0, "decode_ms": 0.0,
+                       "drafts_offered": 0, "drafts_accepted": 0}
+        self.telemetry = None
 
     def enqueue(self):
         with self.lock:
             self.waiting += 1
 
-    def begin(self, prompt_tokens: int):
+    def begin(self, prompt_tokens: int, max_tokens: int, request_id: str):
         with self.lock:
             self.waiting -= 1
-            self.current = {"prompt_tokens": prompt_tokens, "generated": 0, "start": time.time(), "first": None, "last": None}
+            self.rate.clear()
+            self.current = {"id": request_id, "prompt_tokens": prompt_tokens, "max_tokens": max_tokens,
+                            "generated": 0, "start": time.time(), "first": None, "last": None,
+                            "progress": None, "prefill": None, "phase": None}
+
+    def progress(self, reached: int, total: int, prefill: float | None):
+        with self.lock:
+            if self.current:
+                self.current["progress"] = (reached, total)
+                self.current["prefill"] = prefill
+
+    def phase(self, phase: str):
+        with self.lock:
+            if self.current:
+                self.current["phase"] = phase
 
     def token(self):
         with self.lock:
@@ -142,8 +150,9 @@ class Stats:
             c["last"] = time.time()
             if c["first"] is None:
                 c["first"] = c["last"]
+            self.rate.append((c["last"], c["generated"]))
 
-    def end(self, finish: str):
+    def end(self, finish: str, done: dict):
         with self.lock:
             c, self.current = self.current, None
             if c is None:
@@ -157,6 +166,66 @@ class Stats:
             self.context_used = c["prompt_tokens"] + n
             self.history.appendleft({"finished": time.time(), "prompt_tokens": c["prompt_tokens"], "generated": n,
                                      "prompt_s": (c["first"] or time.time()) - c["start"], "tok_s": rate, "finish": finish})
+            seen = c["prompt_tokens"]
+            if done.get("finish") == "cancel" and done.get("prompt_read") is not None:
+                seen = min(seen, (done.get("reused") or 0) + done["prompt_read"])
+            lookups, offloaded = done.get("lookups"), done.get("offloaded")
+            routed = (lookups or 0) + (offloaded or 0)
+            decode_ms = done.get("decode_ms")
+            decoded = done.get("generated", 0)
+            record = {"id": c["id"], "time": c["start"], "duration_s": round(time.time() - c["start"], 1),
+                      "finish": finish, "prompt_tokens": seen, "output_tokens": n,
+                      "reused": done.get("reused"), "prompt_ms": done.get("prompt_ms"), "decode_ms": decode_ms,
+                      "decode_tok_s": round(decoded * 1000 / decode_ms, 1) if decoded >= 2 and decode_ms else None,
+                      "hit_rate": round(done["hits"] / lookups, 3) if lookups else None,
+                      "pcie_share": round(offloaded / routed, 3) if offloaded is not None and routed else None}
+            self.records.appendleft(record)
+            self.totals["requests"] += 1
+            self.totals["prompt_tokens"] += seen
+            self.totals["output_tokens"] += n
+            for key in ("reused", "prompt_ms", "decode_ms", "drafts_offered", "drafts_accepted"):
+                self.totals[key] += done.get(key) or 0
+
+    def speeds(self):
+        with self.lock:
+            c, rate = dict(self.current) if self.current else None, list(self.rate)
+        if not c or c["first"] is None:
+            return {"tok_s": 0.0, "prefill_tok_s_mean": c["prefill"] if c else 0.0}
+        now = time.time()
+        oldest = next(((t, n) for t, n in rate if now - t <= RATE_WINDOW_S), None)
+        newest = rate[-1] if rate else None
+        speed = ((newest[1] - oldest[1]) / (newest[0] - oldest[0])
+                 if newest and oldest and newest[0] - oldest[0] >= RATE_MIN_SPAN_S
+                 else c["generated"] / max(RATE_MIN_SPAN_S, now - c["first"]))
+        return {"tok_s": max(0.0, speed), "prefill_tok_s_mean": 0.0}
+
+    def metrics(self, engine, name, vision, experts, all_requests=False):
+        with self.lock:
+            c = dict(self.current) if self.current else None
+            records, totals, waiting = list(self.records), dict(self.totals), self.waiting
+        now = time.time()
+        state = "unloaded" if engine.proc.poll() is not None else "idle" if not c else "reading" if c["first"] is None else "generating"
+        speed = self.speeds()
+        progress = c["progress"] if c and state == "reading" else None
+        live = {"state": state, "queued": waiting, "phase": c["phase"] if c else None,
+                "prompt_tokens": c["prompt_tokens"] if c else None,
+                "prompt_read": progress[0] if progress else None,
+                "prompt_total": progress[1] if progress else c["prompt_tokens"] if c and state == "reading" else None,
+                "generated": c["generated"] if c else None, "max_tokens": c["max_tokens"] if c else None,
+                "elapsed_s": round(now - c["start"], 1) if c else None,
+                "tok_s": round(speed["tok_s"], 1) if state == "generating" else None,
+                "prefill_tok_s_mean": c["prefill"] if c else None}
+        tel = self.telemetry.snapshot() if self.telemetry else {"now": {}, "history": {}, "static": {}}
+        hardware = tel["now"]
+        if "gpu_mem_used" in hardware and "gpus" not in hardware:
+            hardware["gpus"] = [{"index": 0, **{key: hardware.get("gpu_" + key) for key in
+                                                ("util", "mem_used", "temp", "power", "power_limit",
+                                                 "pcie_gen", "pcie_gen_max", "pcie_width", "pcie_rx_mb")}}]
+        return {"engine": {**engine.info, "model": name, "max_context": engine.max_context,
+                           "images": vision is not None, "experts": experts},
+                "live": live, "requests": records if all_requests else records[:12], "requests_kept": len(records),
+                "totals": totals, "hardware": hardware, "hardware_static": tel["static"],
+                "history": tel["history"], "time": now}
 
     def snapshot(self) -> dict:
         with self.lock:
@@ -273,16 +342,45 @@ class Engine:
 
     def __init__(self, strata: str, model: str, max_context: int, extra: list[str]):
         self.max_context = max_context
+        self.info = {}
+        self.last = {}
         self.proc = subprocess.Popen(
             [strata, "--native", model, "--serve", "--max-context", str(max_context), *extra],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
-        ready = self.proc.stdout.readline()
-        if not ready.startswith("READY"):
-            raise RuntimeError(f"the engine did not start: {ready!r}")
+        for line in self.proc.stdout:
+            if line.startswith("INFO "):
+                for item in line.split()[1:]:
+                    key, sep, value = item.partition("=")
+                    if sep:
+                        self.info[key] = int(value) if value.lstrip("-").isdigit() else value
+            elif line.startswith("READY "):
+                self.max_context = int(line.split()[1])
+                break
+            elif line.startswith("ERR"):
+                raise RuntimeError(f"the engine did not start: {line.strip()}")
+        else:
+            raise RuntimeError("the engine exited before READY")
         self.lock = threading.Lock()
 
-    def generate(self, ids: list[int] | None, max_new: int, sampling: dict, prompt_file: str | None = None):
+    def generate(self, ids: list[int] | None, max_new: int, sampling: dict, prompt_file: str | None = None,
+                 stats: Stats | None = None):
         """Yields token ids; the caller holds self.lock.  Closing the generator cancels the reply."""
+        self.last = {}
+        def finish_line(line):
+            f = line.split()
+            if line.startswith("ERR"):
+                raise RuntimeError(f"engine error: {line.strip()}")
+            self.last = {"generated": int(f[1]), "prompt_tokens": int(f[2]), "prompt_ms": float(f[3]),
+                         "decode_ms": float(f[4]), "finish": f[5]}
+            if len(f) >= 9:
+                self.last.update(drafts_accepted=int(f[6]), drafts_offered=int(f[7]), reused=int(f[8]))
+            if len(f) >= 11:
+                self.last.update(hits=int(f[9]), lookups=int(f[10]))
+            if len(f) >= 15:
+                self.last["prompt_read"] = int(f[14])
+            if len(f) >= 16:
+                self.last["offloaded"] = int(f[15])
+
         keys = " ".join(f"{k}={v}" for k, v in sampling.items())
         if prompt_file:
             line = f"GENE {max_new} {keys} {prompt_file}"
@@ -295,15 +393,25 @@ class Engine:
             for line in self.proc.stdout:
                 if line.startswith("T "):
                     yield int(line.split()[1])
-                elif line.startswith(("DONE", "ERR")):
+                elif line.startswith("PP ") and stats:
+                    f = line.split()
+                    if len(f) >= 3:
+                        stats.progress(int(f[1]), int(f[2]), float(f[4]) if len(f) >= 5 else None)
+                elif line.startswith(("DONE ", "ERR")):
                     done = True
+                    finish_line(line)
+                    if self.last["finish"] in ("error", "nonfinite"):
+                        raise RuntimeError(f"engine generation failed: {self.last['finish']}")
                     return
+            done = True
+            raise RuntimeError("engine exited before completing the request")
         finally:
             if not done:   # the client went away: cancel, then read to the end of the answer
                 self.proc.stdin.write("STOP\n")
                 self.proc.stdin.flush()
                 for line in self.proc.stdout:
-                    if line.startswith(("DONE", "ERR")):
+                    if line.startswith(("DONE ", "ERR")):
+                        finish_line(line)
                         break
 
 
@@ -349,7 +457,7 @@ def v1_status(name: str, stats: Stats, vision: "Vision | None", engine_version: 
 
 
 def make_handler(engine: Engine, tok: Tokenizer, template: ChatTemplate, stop_ids: tuple, name: str, stats: Stats,
-                 vision: "Vision | None", engine_version: str | None = None):
+                 vision: "Vision | None", engine_version: str | None = None, experts: int | None = None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -389,8 +497,9 @@ def make_handler(engine: Engine, tok: Tokenizer, template: ChatTemplate, stop_id
             path = self._route()
             if path in ("/", "/index.html"):
                 self._send(200, PAGE.encode(), "text/html; charset=utf-8")
-            elif path == "/monitor":
-                self._send(200, MONITOR.encode(), "text/html; charset=utf-8")
+            elif path == "/metrics":
+                all_requests = "all" in parse_qs(urlsplit(self.path).query).get("requests", [])
+                self._json(200, stats.metrics(engine, name, vision, experts, all_requests))
             elif path == "/status":
                 self._json(200, stats.snapshot())
             elif path == "/v1/models":
@@ -456,11 +565,11 @@ def make_handler(engine: Engine, tok: Tokenizer, template: ChatTemplate, stop_id
 
             stats.enqueue()
             with engine.lock:
-                stats.begin(n_prompt)
+                stats.begin(n_prompt, max_new, cid)
                 reply: list[int] = []
                 shown = 0   # characters of the text already sent
                 finish = "length"
-                gen = engine.generate(ids, max_new, sampling, prompt_file)
+                gen = engine.generate(ids, max_new, sampling, prompt_file, stats)
                 try:
                     if stream:
                         self.send_response(200)
@@ -476,16 +585,21 @@ def make_handler(engine: Engine, tok: Tokenizer, template: ChatTemplate, stop_id
                             self.wfile.write(f"{len(data):x}\r\n".encode() + data + b"\r\n")
                             self.wfile.flush()
                         emit(chunk({"role": "assistant", "content": ""}))
+                    stopped = False
                     for t in gen:
                         stats.token()
                         if t in stop_ids:
                             finish = "stop"
-                            break
+                            stopped = True
+                            continue
+                        if stopped:
+                            continue
                         reply.append(t)
                         raw = tok.decode(reply)
                         if raw.endswith("\ufffd"):   # a character still being completed
                             continue
                         text = strip_channels(raw)   # the thinking is not part of the answer
+                        stats.phase("answering" if text else "thinking")
                         if stream:
                             upto = safe_prefix_len(text) if tools else safe_prefix_len(text, ("<|channel>",))
                             if upto > shown:
@@ -500,6 +614,18 @@ def make_handler(engine: Engine, tok: Tokenizer, template: ChatTemplate, stop_id
                     tool_calls = [{"id": "call_" + uuid.uuid4().hex[:24], "type": "function",
                                    "function": {"name": n, "arguments": json.dumps(a, ensure_ascii=False)}}
                                   for n, a in calls]
+                    done = engine.last
+                    generated = done.get("generated", len(reply))
+                    reused = done.get("reused")
+                    usage = {"prompt_tokens": n_prompt, "completion_tokens": generated,
+                             "total_tokens": n_prompt + generated}
+                    if reused is not None:
+                        usage["prompt_tokens_details"] = {"cached_tokens": reused}
+                    prompt_ms, decode_ms = done.get("prompt_ms"), done.get("decode_ms")
+                    fresh = max(0, n_prompt - (reused or 0))
+                    timings = {"prompt_ms": prompt_ms, "predicted_ms": decode_ms,
+                               "prompt_per_second": round(fresh * 1000 / prompt_ms, 1) if prompt_ms and fresh else None,
+                               "predicted_per_second": round(generated * 1000 / decode_ms, 1) if decode_ms and generated else None}
                     if stream:
                         if not calls and len(text) > shown:
                             emit(chunk({"content": text[shown:]}))
@@ -507,7 +633,7 @@ def make_handler(engine: Engine, tok: Tokenizer, template: ChatTemplate, stop_id
                             emit(chunk({"content": content}))
                         if calls:
                             emit(chunk({"tool_calls": [{"index": i, **c} for i, c in enumerate(tool_calls)]}))
-                        emit(chunk({}, finish))
+                        emit({**chunk({}, finish), "usage": usage, "timings": timings})
                         emit("[DONE]")
                         self.wfile.write(b"0\r\n\r\n")
                     else:
@@ -517,15 +643,19 @@ def make_handler(engine: Engine, tok: Tokenizer, template: ChatTemplate, stop_id
                         self._json(200, {
                             "id": cid, "object": "chat.completion", "created": created, "model": name,
                             "choices": [{"index": 0, "message": message, "finish_reason": finish}],
-                            "usage": {"prompt_tokens": n_prompt, "completion_tokens": len(reply),
-                                      "total_tokens": n_prompt + len(reply)}})
+                            "usage": usage, "timings": timings})
                 except (BrokenPipeError, ConnectionResetError):
                     finish = "disconnected"
+                except Exception:
+                    finish = "error"
+                    raise
                 finally:
-                    gen.close()
-                    stats.end(finish)
-                    if prompt_file:
-                        os.unlink(prompt_file)
+                    try:
+                        gen.close()
+                    finally:
+                        stats.end(finish, engine.last)
+                        if prompt_file:
+                            os.unlink(prompt_file)
     return Handler
 
 
@@ -534,7 +664,7 @@ def main() -> int:
     ap.add_argument("model")
     ap.add_argument("--strata", default=str(Path(__file__).resolve().parent.parent / "build" / "strata"))
     ap.add_argument("--host", default="0.0.0.0")
-    ap.add_argument("--port", type=int, default=8088)
+    ap.add_argument("--port", type=int, default=8089)
     ap.add_argument("--max-context", type=int, default=131072)
     ap.add_argument("--name", default="gemma-4-26b-a4b")
     ap.add_argument("--mmproj", default=None, help="the vision projector GGUF (default: mmproj-*.gguf beside the model)")
@@ -542,7 +672,8 @@ def main() -> int:
     args, engine_args = ap.parse_known_args()   # what it does not know goes to the engine (--no-gpu, --kv-type, ...)
 
     tok = Tokenizer.from_gguf(args.model)
-    template = ChatTemplate(GGUFFile(Path(args.model)).metadata["tokenizer.chat_template"])
+    metadata = GGUFFile(Path(args.model)).metadata
+    template = ChatTemplate(metadata["tokenizer.chat_template"])
     stop_ids = tuple(tok.encode(t, parse_special=True)[0] for t in STOP_TOKENS)
     if "--stop-ids" not in engine_args:
         engine_args += ["--stop-ids", ",".join(map(str, stop_ids))]
@@ -555,14 +686,20 @@ def main() -> int:
         version = subprocess.run([args.strata, "--version"], capture_output=True, text=True, timeout=10).stdout.strip() or None
     except (OSError, subprocess.SubprocessError):
         version = None
-    httpd = ThreadingHTTPServer((args.host, args.port), make_handler(engine, tok, template, stop_ids, args.name, Stats(args.max_context), vision, version))
+    stats = Stats(engine.max_context)
+    if Telemetry:
+        stats.telemetry = Telemetry(extra=stats.speeds)
+    httpd = ThreadingHTTPServer((args.host, args.port), make_handler(
+        engine, tok, template, stop_ids, args.name, stats, vision, version, metadata.get("gemma4.expert_count")))
     httpd.daemon_threads = True
-    print(f"Gemma 4 server on http://{args.host}:{args.port}/ (OpenAI API: /v1/chat/completions, monitor: /monitor)", flush=True)
+    print(f"Gemma 4 server on http://{args.host}:{args.port}/ (OpenAI API: /v1/chat/completions)", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        if stats.telemetry:
+            stats.telemetry.close()
         engine.proc.terminate()
     return 0
 
