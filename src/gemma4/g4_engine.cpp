@@ -685,9 +685,16 @@ int32_t argmax(const std::vector<float>& v) {
     return (int32_t) (std::max_element(v.begin(), v.end()) - v.begin());
 }
 
-int32_t sample(std::vector<float> lg, const strata::qwen35::Sampling& s, const std::vector<int32_t>& hist,
+int32_t sample(const std::vector<float>& logits, const strata::qwen35::Sampling& s, const std::vector<int32_t>& hist,
                std::mt19937_64& rng) {
-    strata::qwen35::apply_penalties(lg, s, hist);
+    std::vector<float> penalized;
+    const std::vector<float>* candidate = &logits;
+    if (s.needs_penalties() && !hist.empty()) {
+        penalized = logits;
+        strata::qwen35::apply_penalties(penalized, s, hist);
+        candidate = &penalized;
+    }
+    const std::vector<float>& lg = *candidate;
     if (s.temperature <= 0.f) return argmax(lg);
     std::vector<int32_t> idx(lg.size());
     std::iota(idx.begin(), idx.end(), 0);

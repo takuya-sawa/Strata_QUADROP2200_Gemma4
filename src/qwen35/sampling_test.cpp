@@ -98,6 +98,11 @@ int main() {
         const std::vector<float> before = row;
         apply_penalties(row, t, {1, 2, 99});
         check(same_bits(row, before), "no penalty: no change");
+        check(!t.needs_penalties(), "default sampling does not need a penalty copy");
+        t.repeat = 1.2f;
+        check(!t.needs_penalties(), "penalty settings with an empty window do not need a copy");
+        t.last_n = -1;
+        check(t.needs_penalties(), "configured penalties with a history window need a copy");
     }
 
     // an empty row with a history does not crash

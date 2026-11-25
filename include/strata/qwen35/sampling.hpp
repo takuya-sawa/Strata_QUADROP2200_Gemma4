@@ -14,6 +14,7 @@ struct Sampling {
     float temperature = 0.f, top_p = 1.f, min_p = 0.f, repeat = 1.f, freq = 0.f, present = 0.f;
     int top_k = 20, last_n = 0;
     unsigned long long seed = 0;
+    bool needs_penalties() const { return last_n != 0 && (repeat != 1.f || freq != 0.f || present != 0.f); }
     bool needs_logits() const { return temperature > 0.f || repeat != 1.f || freq != 0.f || present != 0.f; }
 };
 
@@ -22,7 +23,7 @@ struct Sampling {
 /// token that is not in the row (id < 0 or >= lg.size()) is not in it and takes no penalty - it used to index past the
 /// row (#3911).
 inline void apply_penalties(std::vector<float>& lg, const Sampling& s, const std::vector<int32_t>& hist) {
-    if (s.last_n != 0 && (s.repeat != 1.f || s.freq != 0.f || s.present != 0.f)) {
+    if (s.needs_penalties()) {
         std::map<int, int> cnt;
         const size_t from = s.last_n < 0 || (size_t) s.last_n >= hist.size() ? 0 : hist.size() - (size_t) s.last_n;
         for (size_t i = from; i < hist.size(); ++i) ++cnt[hist[i]];
