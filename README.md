@@ -50,9 +50,7 @@
 | Engine | Strata 0.1.59.1 built here (`build-local-p2200/strata`) |
 | Weights | `gemma-4-26B_q4_0-it.gguf` 14.4 GB + `mmproj-gemma-4-26B-A4B-it-Q8_0.gguf` 0.81 GB in `~/models/` (never committed) |
 
-The model **does not fit in 5 GB of VRAM or in 16 GB of RAM**. It runs anyway because the MoE experts stay on the CPU (native / IQ-quantized)
-while only the attention layers sit in VRAM (about 4.7 GB used). `tools/gemma4_server.py` starts `strata` with `--native`; `--no-gpu` makes it
-CPU-only and slower. Live usage: GPU **4,696 / 5,120 MiB** at 34 °C, 11,712 MiB of RAM available, 11 requests served with 0 errors.
+The model does not fit in 5 GB of VRAM. `tools/gemma4_server.py` starts `strata` with `--native`, placing attention and other shared tensors on the GPU, plus any whole expert layers that fit. After the 2026-11-25 restart, **640 of 3,840 experts (5 of 30 layers; 2,041 MiB of expert weights)** were in VRAM; the remaining experts run on the CPU. `--no-gpu` makes it CPU-only and slower.
 
 <a id="measured-speed"></a>
 
@@ -63,10 +61,12 @@ Retested on 2026-11-25 through the running `http://localhost:8089/v1` API: Quadr
 | Situation | Measured |
 | --- | --- |
 | 100 output tokens from short prompts, 6 runs | **Median 10.25 tokens/s** (range 6.7-11.6; median 11.1 for the last 3) |
-| 1,898 input tokens, 1,894 freshly processed | **67.62 s, 28.0 tokens/s** |
+| 1,898 input tokens, 1,894 freshly processed (fixed benchmark) | **67.62 s, 28.0 tokens/s** |
 | Repeat the same input, 1,897 tokens reused from KV cache | **0.092 s** to process fresh input |
+| 33,578-token prompt sent from VS Code, mostly uncached | **23 min 24 s** prompt processing, about **23.9 tokens/s**; 23 min 46 s total including generation |
+| Continue with the same 33,578-token VS Code context, 33,577 reused from KV cache | **about 0.11 s** prompt processing; 95 output tokens took about 11 s (8.2-8.5 tokens/s) |
 
-The short test uses the three prompts in [`tools/ab_engine.py`](tools/ab_engine.py) twice each; the long test uses `long_prompt(1861)` from that file. The long test ran once after the short tests; it was not a cold OS/model-load test. The repeat is the same input, not a continued conversation. Speed varies with load and warm-up.
+The short test uses the three prompts in [`tools/ab_engine.py`](tools/ab_engine.py) twice each; the fixed long test uses `long_prompt(1861)` from that file. It ran once after the short tests, not as a cold OS/model-load test. The VS Code figures come from the live API records: the model was already loaded, the first long prompt was mostly uncached, and follow-ups reused the same conversation prefix. Speed varies with load and warm-up.
 
 **Previous measurements: 2026-11-18** (the API then used `:8088`, Strata 0.1.59.1):
 
@@ -77,9 +77,9 @@ The short test uses the three prompts in [`tools/ab_engine.py`](tools/ab_engine.
 | Short request, 41 input tokens | 3.3 s prompt, 8.5 tokens/s output |
 | Follow-up over an already-read 32,280-token prefix (KV cache reuse) | **0.34-0.37 s** |
 | Output in the middle of a long conversation | **3.1 tokens/s** |
-| First read of 32,000 input tokens (nothing cached) | **about 4,640 s (77 minutes)** |
+| First read of 32,000 input tokens (older 2026-11-18 reference) | **about 4,640 s (77 minutes)** |
 
-The new short-prompt median exceeds the earlier 8.3-8.5 tokens/s, and the roughly 1,900-token prompt took less time than the earlier 87.1 s. The old prompts and load cannot be confirmed identical, however, so this is not a controlled A/B comparison or a reliable improvement percentage. Long-conversation and 32k-input figures were not retested.
+The real VS Code request on 2026-11-25 processed a roughly 33.6K-token first prompt in about 23 min 24 s. The older 77-minute figure was measured under different conditions and is retained only as historical context, not a controlled comparison.
 
 So this is not a fork that makes Strata fast. It is a fork that makes it **run at all, locally, on hardware the upstream guides treat as
 unsupported** (see [docs/OLDER_GPUS.md](docs/OLDER_GPUS.md)). Upstream speed numbers for RTX 5070 / RTX 3060 cards are in
@@ -160,8 +160,9 @@ This is the entry this machine actually uses in `chatLanguageModels.json` (Setti
 }
 ```
 
-`maxInputTokens` is set to **122880** here, but a cold 32k prompt takes over an hour on this box, so **start at 12288** and raise it only for
-conversations whose prefix is already cached. `maxOutputTokens: 8192` can mean 15 minutes for one answer. Other machines in this setup are added
+`maxInputTokens` is set to **122880** here. A mostly uncached 33.6k-token VS Code prompt took about 23 minutes to process; follow-ups with the same
+conversation prefix took about 0.11 seconds to process the prompt. To reduce waits, shorten the VS Code conversation history and **start around 12288**.
+`maxOutputTokens: 8192` can mean 15 minutes for one answer. Other machines in this setup are added
 to the same file as `customendpoint` entries with `"apiType": "messages"` and `http://<that machine's IP>:<port>/v1`. The API is
 OpenAI-compatible, so Claude Code, Codex CLI, OpenCode and similar tools work too (upstream: [docs/TERMINAL_LAUNCH.md](docs/TERMINAL_LAUNCH.md),
 [docs/AI_SETUP.md](docs/AI_SETUP.md)).

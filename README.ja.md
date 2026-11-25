@@ -48,7 +48,7 @@
 | エンジン | Strata 0.1.59.1 (このツリーの `build-local-p2200/strata`) |
 | モデル | `gemma-4-26B_q4_0-it.gguf` 14.4 GB + `mmproj-gemma-4-26B-A4B-it-Q8_0.gguf` 0.81 GB を `~/models/` に (コミットしません) |
 
-モデルは **VRAM 5 GB にも RAM 16 GB にも入りきりません。** 動くのは、MoE のエキスパートを CPU 側 (ネイティブ / IQ 量子化) に置き、attention 部分だけを VRAM (約 4.7 GB) に載せているからです。`tools/gemma4_server.py` は `strata --native` で起動します (`--no-gpu` にすると完全に CPU だけになり、さらに遅くなります)。稼働中の実測: GPU **4,696 / 5,120 MiB**・34 °C・利用可能メモリ 11,712 MiB・リクエスト 11 件・エラー 0 件。
+モデル全体は **VRAM 5 GB に入りません**。`tools/gemma4_server.py` は `strata --native` で起動し、attention などに加え、VRAM に収まるエキスパートのレイヤーも GPU に置きます。2026-11-25 の再起動後に確認した配置は **3,840 個中 640 個 (30 レイヤー中 5 レイヤー)、エキスパート重み 2,041 MiB**。残りのエキスパートは CPU 側です。`--no-gpu` にすると完全に CPU だけになり、さらに遅くなります。
 
 <a id="measured-speed"></a>
 
@@ -59,10 +59,12 @@
 | 状況 | 実測 |
 | --- | --- |
 | 短い入力から 100 token 出力、6 回 | **中央値 10.25 token/s** (範囲 6.7〜11.6、後半 3 回の中央値 11.1) |
-| 入力 1,898 token、うち 1,894 token を新規処理 | **67.62 秒、28.0 token/s** |
+| 入力 1,898 token、うち 1,894 token を新規処理 (固定ベンチマーク) | **67.62 秒、28.0 token/s** |
 | 同じ入力の再送、1,897 token を KV 再利用 | 新規入力の処理 **0.092 秒** |
+| VS Code から送った 33,578 token、ほぼ未キャッシュの入力 | **入力処理 23 分 24 秒、約 23.9 token/s**。生成を含む全体 23 分 46 秒 |
+| 同じ 33,578 token の続き、33,577 token を KV 再利用 | 入力処理 **約 0.11 秒**。95 token の生成は約 11 秒 (8.2〜8.5 token/s) |
 
-短文は [`tools/ab_engine.py`](tools/ab_engine.py) の 3 問を各 2 回、長文は同ファイルの `long_prompt(1861)` を使用。長文は短文測定後の 1 回で、OS・モデル読み込み直後のコールド測定ではありません。再送は会話の続きではなく同じ入力の繰り返しです。速度は負荷やウォームアップにより変動します。
+短文は [`tools/ab_engine.py`](tools/ab_engine.py) の 3 問を各 2 回、長文は同ファイルの `long_prompt(1861)` を使用。固定ベンチマークの長文は 1 回測定で、OS・モデル読み込み直後のコールド測定ではありません。VS Code の値は実際の会話の API 記録です。初回の長文はモデル起動済み・入力の大部分は未キャッシュで測定し、後続は同じ会話でキャッシュが効いた状態です。速度は負荷やウォームアップにより変動します。
 
 **参考: 2026-11-18 の実測** (当時の API は `:8088`、Strata 0.1.59.1):
 
@@ -73,9 +75,9 @@
 | 入力 41 token の短いリクエスト | プロンプト 3.3 秒・出力 8.5 token/s |
 | 一度読んだ 32,280 token を含む後続リクエスト (KV キャッシュ再利用) | **0.34〜0.37 秒** |
 | 長い会話の途中での出力 | **3.1 token/s** |
-| 入力 32,000 token を**初めて**読む (キャッシュなし) | **約 4,640 秒 (77 分)** |
+| 入力 32,000 token を**初めて**読む (2026-11-18 の旧参考値) | **約 4,640 秒 (77 分)** |
 
-今回の短文の中央値は旧出力値 8.3〜8.5 token/s より高く、約 1,900 token の入力時間も旧 87.1 秒より短くなりました。ただし旧測定とプロンプト・負荷などが同一と確認できないため、厳密な同条件比較や改善率ではありません。長い会話と 32k 入力は今回再測定していません。
+2026-11-25 の VS Code 実測では、約 33.6k token の初回入力を約 23 分 24 秒で処理しました。**旧 77 分という数値は古い条件の参考値で、現在の実測とは同条件比較ではありません。**
 
 つまりこのフォークは Strata を **速くするものではなく、本家のガイドが「対応外」と扱う古いカードで (→ [docs/OLDER_GPUS.md](docs/OLDER_GPUS.md))、動くようにするもの**です。本家の RTX 5070 / RTX 3060 の速度は [docs/DEEPSEEK41.md](docs/DEEPSEEK41.md) と [docs/CAPABILITIES.md](docs/CAPABILITIES.md) にあります。桁で違います。
 
@@ -147,7 +149,7 @@ cmake --build build-local-p2200 -j4
 }
 ```
 
-`maxInputTokens` は実際に **122880** に設定しています。ただし冷えた状態で 32k を読むと 1 時間以上かかるので、**まずは 12288 から始める**ことをおすすめします (先頭のメッセージが同じ続きのリクエストだけが KV キャッシュで速くなります)。`maxOutputTokens: 8192` は 1 回答に 15 分以上かかることがあります。他のマシン (RTX / GTX のサーバー) は同じファイルに `customendpoint`・`"apiType": "messages"` で `http://<そのマシンの IP>:<port>/v1` として追加しています。OpenAI 互換なので Claude Code・Codex CLI・OpenCode などからも使えます (本家: [docs/TERMINAL_LAUNCH.md](docs/TERMINAL_LAUNCH.md)、[docs/AI_SETUP.md](docs/AI_SETUP.md))。
+`maxInputTokens` は実際に **122880** に設定しています。VS Code からの約 33.6k token は初回約 23 分、同じ会話の続きは KV キャッシュ再利用後に約 0.11 秒で入力を処理しました。待ち時間を減らしたい場合は、VS Code の会話履歴を短くし、**まずは 12288 程度から**試してください (先頭のメッセージが同じ続きのリクエストは KV キャッシュで速くなります)。`maxOutputTokens: 8192` は 1 回答に 15 分以上かかることがあります。他のマシン (RTX / GTX のサーバー) は同じファイルに `customendpoint`・`"apiType": "messages"` で `http://<そのマシンの IP>:<port>/v1` として追加しています。OpenAI 互換なので Claude Code・Codex CLI・OpenCode などからも使えます (本家: [docs/TERMINAL_LAUNCH.md](docs/TERMINAL_LAUNCH.md)、[docs/AI_SETUP.md](docs/AI_SETUP.md))。
 
 <a id="fork-only-files"></a>
 
