@@ -103,6 +103,7 @@ const DIST = process.env.STRATA_DIST
     : join(ROOT, 'dist');
 const PORT = Number(process.env.STRATA_PORT ?? 8791);
 const HOST = process.env.STRATA_BIND ?? '127.0.0.1';
+const WEB_LAN_ORIGIN = process.env.STRATA_WEB_LAN_ORIGIN ?? '';
 /* The folder chats work in when nothing else is chosen. It is never the app's own folder (the host is started inside its install
    directory, so `process.cwd()` was "host" in the sidebar and the agent could read and write the app): the person's own
    Documents\Strata\Workspace (the models folder is next to it, not in it), created on first use, unless STRATA_WORKSPACE names one. */
@@ -977,8 +978,10 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (path.startsWith('/api/') && req.headers.origin) {
-      const origin = new URL(req.headers.origin);
-      if (!['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname)) return error(res, 403, 'Open the local Strata app to use host controls.');
+      let origin;
+      try { origin = new URL(req.headers.origin); }
+      catch { return error(res, 403, 'Open the local Strata app to use host controls.'); }
+      if (!['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname) && req.headers.origin !== WEB_LAN_ORIGIN) return error(res, 403, 'Open the local Strata app to use host controls.');
     }
     if (path.startsWith('/api/')) {
       const modelOperation = !['GET', 'OPTIONS'].includes(method) && /^\/api\/(models|local-models|runtime|image-models|engine|native)(\/|$)/.test(path) && !['/api/runtime/plan', '/api/engine/validate', '/api/local-models/inspect'].includes(path);

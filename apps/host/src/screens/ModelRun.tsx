@@ -22,7 +22,7 @@ import { computerIdentity, configIdentity, defaultProfileKey, emptyProfiles, rea
 import { modelFamilyIcon } from '../lib/model-icons';
 import { familyVersion, modelFamilies } from '../lib/model-versions';
 import { sizeGb } from '../lib/format';
-import { applyImageModel, getState, useLifecycle, loadRuntimeModel, loadVariant, pushToast, restartEngine, saveEngine, selectImageModel, setConfigDraft, useStore, validateEngine } from '../lib/store';
+import { applyImageModel, getState, go, newSession, useLifecycle, loadRuntimeModel, loadVariant, pushToast, restartEngine, saveEngine, selectImageModel, selectRemoteModel, setConfigDraft, setSettingsSection, useStore, validateEngine } from '../lib/store';
 import type { ImageModelChoice, RuntimeModels, RuntimeModel } from '../lib/types';
 import { useNative, nativeSettled, subscribeNative } from '../lib/native';
 import { NativeModels } from '../components/NativeModels';
@@ -35,12 +35,32 @@ type Issue = {
 type RunStage = 'idle' | 'checking' | 'loading' | 'ready';
 export function ModelRunScreen() {
     const native = useNative();
+    const external = useStore(s => s.monitor?.externalEngine);
+    const providers = useStore(s => s.providers);
+    const streaming = useStore(s => s.streaming);
     const settled = useSyncExternalStore(subscribeNative, nativeSettled);
     const location = parseLocation(window.location.hash), entry = location.param;
     const [other, setOther] = useState(entry === 'local' || entry === 'local-import'), [importFirst, setImportFirst] = useState(entry === 'local-import');
     // Before the engine's answer arrives the page would show the bundled Starter and then jump to the installed model (#3740): show a neutral placeholder instead.
     if (!native && !settled)
         return <div className="main__body"><div className="wrap stack" role="status" aria-label={tr("Loading…")}><div className="skel" style={{ height: 20, width: '60%' }}/><div className="skel" style={{ height: 20, width: '80%' }}/><div className="skel" style={{ height: 20, width: '70%' }}/></div></div>;
+    if (external && !other) {
+        const id = external.modelId ?? external.configuredModelId;
+        const connection = providers?.connections.find(c => c.id === external.connectionId);
+        const model = connection?.models.find(m => m.id === id);
+        return <Screen title={tr("Models")}><div className="stack stack--lg">
+          <section className="st-card stack">
+            <div className="section-toolbar"><h2 className="h3">{model?.name ?? id}</h2><span className="model-status">{tr(external.connected ? 'Connected' : 'Unavailable')}</span></div>
+            <p className="small muted">{tr("API")} · {id}</p>
+            {tr(external.connected && model?.contextMax ? <p className="small">{tr("Context")}: {model.contextMax.toLocaleString()}</p> : null)}
+            <div className="row">
+              <Btn variant="primary" disabled={!model || streaming} onClick={() => { const session = newSession(); selectRemoteModel({ connectionId: external.connectionId, modelId: id }); go('chat', session.id); }}>{tr("Start a new chat")}</Btn>
+              <Btn onClick={() => { setSettingsSection('Models'); go('settings'); }}>{tr("Manage API models")}</Btn>
+              <Btn variant="ghost" onClick={() => setOther(true)}>{tr("Other local models")}</Btn>
+            </div>
+          </section>
+        </div></Screen>;
+    }
     if (native && other)
         return <NativeLocalModel onBack={() => { setOther(false); setImportFirst(false); }}/>;
     if (native && !other)

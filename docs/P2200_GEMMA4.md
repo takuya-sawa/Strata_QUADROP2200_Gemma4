@@ -185,10 +185,11 @@ OpenAI 互換なので、Claude Code・Codex CLI・OpenCode などからも使�
 
 **注意:**
 
-- Web 画面は **loopback 専用**です (`STRATA_BIND=127.0.0.1`)。`/api/*` は Origin が localhost 以外だと 403 になります。他の PC (Windows など) から開くときは SSH ポートフォワードを使います:
+- Web 画面は既定では **loopback 専用**です (`STRATA_BIND=127.0.0.1`)。他の PC (Windows など) から安全に開くには SSH ポートフォワードを使います:
   ```bash
   ssh -L 8088:localhost:8088 owner@192.168.1.10   # ブラウザで http://localhost:8088/
   ```
+- LAN に直接公開する場合は、例えば `STRATA_BIND=192.168.1.10 STRATA_WEB_LAN_ORIGIN=http://192.168.1.10:8088 ./strata-web.sh` で起動し、指定した URL から開きます。**認証はなく、LAN 上の利用者にチャット履歴やホストの操作機能が公開されるため、信頼できるネットワークでのみ使用してください。** IP アドレスやポートを変える場合は両方の設定を合わせて変更してください。
 - モデルピッカーの "API models" を使わず **ローカルモデル (ダウンロードして読み込む)** を選まないでください。ウェイトのダウンロード (66 GB) だけでなく、本家の読み込み経路は `llama-server` を起動しようとしてこのビルドでは失敗します。エンジンには必ず `:8089` の接続 (上の接続) 経由でつないでください。
 - GPU・速度・トークン数・履歴は Web 画面の **Monitor** タブ (`http://127.0.0.1:8088/#/monitor`) で確認できます。エンジンが報告しない項目は `—` で表示されます。
 - Web 画面が持つ OpenAI 互換 API (`/v1/...`) は Strata デスクトップの「他のデバイスに公開」設定が必要なため、外部ツール (VS Code など) は引き続き **`:8089` を直接**使ってください (上の「4.」)。
@@ -203,7 +204,7 @@ OpenAI 互換なので、Claude Code・Codex CLI・OpenCode などからも使�
 - 全体的に遅い / スワップが増えていく → まずメモリ不足を疑ってください。`MAX_CONTEXT` を下げ、ブラウザなどを閉じ、`--no-gpu` は使わないでください。
 - Web 画面で `inference · simulated` となる → エンジンが見てもらえていません。`curl http://127.0.0.1:8089/v1/status` が `"service":"strata"` を返すか確認し、返らないなら (古いコードで動いているサーバーを止めて) `./strata-web.sh` をもう一度実行してください。モデルピッカーで API の "Gemma 4 26B-A4B" が選ばれているかも確認してください。Monitor 上部の「モデルの読み込みなし」はアプリ管理のローカルモデルに関する表示で、API 接続のエンジン稼働を否定するものではありません。
 - Ctrl+C 後に GPU が空かない / `:8089` が塞がったまま → 古い `strata-gemma4` が残っています。`ps -C strata-gemma4` で PID を見て `kill <PID>` してください (GPU を掴んでいるかは `nvidia-smi` で確認できます)。
-- Web 画面の `/api/...` が 403 になる →Origin が localhost 以外から来ています (`STRATA_BIND` を変更したり、直接 IP で開いたりしていませんか)。loopback または `ssh -L` で開いてください。
+- Web 画面の `/api/...` が 403 になる → localhost 以外から開く場合は `STRATA_WEB_LAN_ORIGIN` がブラウザの URL のオリジンと一致するか確認してください。既定の安全な設定では loopback または `ssh -L` で開きます。
 - トラブルの一般手順: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 
 ## このリポジトリにしかないもの

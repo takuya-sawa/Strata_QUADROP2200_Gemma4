@@ -23,7 +23,7 @@ const l = net.Server.prototype.listen; net.Server.prototype.listen = function (.
 const b = dgram.Socket.prototype.bind; dgram.Socket.prototype.bind = function (...a) { note('bind', a); return b.apply(this, a); };\n`);
   const port = await freePort();
   const env = { ...process.env, STRATA_HOME: home, STRATA_PORT: String(port), STRATA_MODELS_DIR: join(home, 'm'), NODE_OPTIONS: `--require ${hook}` };
-  delete env.STRATA_SHARE_PORT; delete env.STRATA_TUNNEL_PORT; delete env.STRATA_BIND;
+  delete env.STRATA_SHARE_PORT; delete env.STRATA_TUNNEL_PORT; delete env.STRATA_BIND; delete env.STRATA_WEB_LAN_ORIGIN;
   const child = spawn(process.execPath, ['server/index.mjs'], { cwd, env });
   let err = ''; child.stderr.on('data', d => { err += d; });
   t.after(() => { child.kill(); });
@@ -37,4 +37,22 @@ const b = dgram.Socket.prototype.bind; dgram.Socket.prototype.bind = function (.
     // listen(port, host, cb): the host is the string argument; no string means "all addresses", which is what the firewall asks about
     assert.ok(host === '127.0.0.1' || host === '::1', `${c.what}(${JSON.stringify(c.args)}) is not on the loopback address`);
   }
+});
+
+test('host controls accept only the explicitly configured LAN origin', async t => {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'strata-lan-')));
+  const port = await freePort();
+  const base = `http://127.0.0.1:${port}`;
+  const origin = `http://192.168.1.10:${port}`;
+  const env = { ...process.env, STRATA_HOME: home, STRATA_MODELS_DIR: join(home, 'm'), STRATA_PORT: String(port), STRATA_BIND: '127.0.0.1', STRATA_WEB_LAN_ORIGIN: origin };
+  const child = spawn(process.execPath, ['server/index.mjs'], { cwd, env });
+  let err = ''; child.stderr.on('data', d => { err += d; });
+  t.after(async () => { child.kill(); await new Promise(resolve => child.once('exit', resolve)); rmSync(home, { recursive: true, force: true }); });
+  let up = false;
+  for (let i = 0; i < 300 && !up; i++) { try { up = (await fetch(`${base}/api/health`)).ok; } catch { await new Promise(r => setTimeout(r, 100)); } }
+  assert.ok(up, 'the host answers: ' + err.slice(-400));
+  assert.equal((await fetch(`${base}/api/health`, { headers: { origin } })).status, 200);
+  assert.equal((await fetch(`${base}/api/health`, { headers: { origin: `http://192.168.1.11:${port}` } })).status, 403);
+  assert.equal((await fetch(`${base}/api/health`, { headers: { origin: `http://192.168.1.10:${port + 1}` } })).status, 403);
+  assert.equal((await fetch(`${base}/api/health`, { headers: { origin: 'invalid' } })).status, 403);
 });

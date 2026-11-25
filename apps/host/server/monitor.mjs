@@ -281,6 +281,15 @@ export function snapshot() {
       logCount: engine.logCount,
     },
   };
+  const [connectionId, ...modelParts] = (process.env.STRATA_TASK_REMOTE_MODEL ?? '').split(':');
+  if (process.env.STRATA_SERVER_URL?.trim() && connectionId && modelParts.join(':')) {
+    result.externalEngine = {
+      connectionId,
+      configuredModelId: modelParts.join(':'),
+      modelId: typeof externalMetrics?.engine?.model === 'string' ? externalMetrics.engine.model : null,
+      connected: !!externalMetrics,
+    };
+  }
   const dashboard = engine.running&&engineMetrics.source==='engine'&&engineMetrics.dashboard ? engineMetrics.dashboard : externalMetrics;
   return dashboard ? originalDashboard(dashboard,cachedHardware()??hwCache,result) : result;
 }
