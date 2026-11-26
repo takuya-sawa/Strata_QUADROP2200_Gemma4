@@ -183,6 +183,8 @@ OpenAI 互換なので、Claude Code・Codex CLI・OpenCode などからも使�
 
 ## 5. 本家の Web 画面 (Strata アプリの UI)
 
+別の PC への移設手順と本家ソースの入手先は [Web UI 移設ガイド](WEBUI_MIGRATION.ja.md) を参照してください。
+
 本家 Strata の Web 画面 [`apps/host/`](../apps/host) を、このフォークの実エンジン (上の `:8089`) に接続して使えます。起動はリポジトリ直下の [`strata-web.sh`](../strata-web.sh) 一つです:
 
 ```bash
