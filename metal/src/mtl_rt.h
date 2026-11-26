@@ -2,7 +2,7 @@
 //
 // The implementation (mtl_rt.mm) is the only Objective-C++ file; every program and test is plain C++ against this
 // header.  Kernels are MSL source files compiled at run time (newLibraryWithSource): the Command Line Tools have no
-// offline `metal` compiler, and the runtime compiler is part of the OS.  ggml-common.h (MIT, third_party/ggml) is
+// offline `metal` compiler, and the runtime compiler is part of the OS.  The quant header (include/strata/quant/strata-quant-common.h) is
 // prepended for the i-quant grids and block structs.
 #pragma once
 
@@ -23,6 +23,8 @@ struct Buffer {
     std::shared_ptr<std::vector<void*>> chunks;
     size_t stride = 0;
     size_t bias = 0;          // bytes from the MTLBuffer's start to ptr (a view onto an allocation the runtime owns)
+    // or disjoint regions (Context::wrap_ranges): chunk k holds the bytes from starts[k]; the gaps are not wrapped
+    std::shared_ptr<std::vector<size_t>> starts;
     template <class T> T* as() const { return static_cast<T*>(ptr); }
 };
 
@@ -83,10 +85,6 @@ public:
     bool supports_metal4() const;
     uint64_t recommended_working_set() const;
     uint64_t max_buffer_length() const;
-    // Keeps the GPU out of its low-clock idle state while dispatches keep coming (a lone kernel in a quiet GPU runs 2-3x slower:
-    // measured 205 vs 69 us for the same matvec): a spin kernel of one threadgroup on a second queue, stopped 50 ms after the
-    // last dispatch.  DS4_NO_KEEPALIVE=1: off.
-    void start_keepalive();
     // Zero-copy weights: the GPU address of host memory [p, p + bytes) (file-backed pages of the model, RAM slots) through a
     // no-copy buffer over the pages it spans, made resident.  0: not mappable (the cap on buffers is reached, or the pages are not
     // ours).  The first dispatch that reads cold pages waits for them (the buffer is wired on use).
@@ -109,6 +107,9 @@ public:
     // the same, also when bytes > maxBufferLength: then overlapping chunks, each holding any range of up to
     // max_span bytes that starts in it (max_span = the largest tensor bound at one offset)
     Buffer wrap(void* page_aligned, size_t bytes, size_t max_span);
+    // only the given [begin, end) byte ranges (page-aligned, ascending, each up to maxBufferLength), bound by their
+    // offsets from the start of p: what lies between them is never wrapped, so it stays out of the GPU's working set
+    Buffer wrap_ranges(void* page_aligned, const std::vector<std::pair<size_t, size_t>>& ranges);
     void free(Buffer& b);
 
     // Encodes `ds` into ONE compute encoder (serial or concurrent dispatch type) and ONE command buffer, `reps`
@@ -141,7 +142,7 @@ public:
     // Runs `ds` repeatedly for about `seconds` of wall time: lifts the GPU out of its idle clocks before a timing.
     void warm(const std::vector<Dispatch>& ds, double seconds = 0.3);
 
-    std::string ggml_common_path;                // where ggml-common.h is read from
+    std::string ggml_common_path;                // where strata-quant-common.h (formerly ggml-common.h) is read from
     std::string kernel_dir;                      // where relative kernel paths resolve
 
 private:

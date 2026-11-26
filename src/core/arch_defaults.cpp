@@ -2,6 +2,7 @@
 #include "strata/core/arch_defaults.hpp"
 #include "strata/core/defaults_026.hpp"
 #include "strata/core/amd_community.hpp"
+#include "strata/core/gfx11_extra.hpp"
 #include "strata/core/gfx12_extra.hpp"
 
 #include "strata/kernels/gfx_arch.hpp"
@@ -148,6 +149,26 @@ bool igpu_uma_arena_default(const char* gcn_arch, bool integrated, bool windows,
     return on && strata::kernels::gfx_arch_is(gcn_arch, "gfx1103");
 }
 
+bool igpu_arena_no_thp_default(const char* gcn_arch, bool integrated, bool windows) {
+    if (!integrated || windows) return false;
+    return strata::kernels::gfx_arch_is(gcn_arch, "gfx1103") || strata::kernels::gfx_arch_is(gcn_arch, "gfx1150") ||
+           strata::kernels::gfx_arch_is(gcn_arch, "gfx1151") || strata::kernels::gfx_arch_is(gcn_arch, "gfx1152") ||
+           strata::kernels::gfx_arch_is(gcn_arch, "gfx1153");
+}
+
+bool igpu_kfd_settle_default(const char* gcn_arch, bool integrated, bool windows) {
+    return igpu_arena_no_thp_default(gcn_arch, integrated, windows);   // the same device class
+}
+
+bool igpu_cache_drop_default(const char* gcn_arch, bool integrated, bool windows) {
+    return igpu_arena_no_thp_default(gcn_arch, integrated, windows);   // the same device class
+}
+
+bool igpu_fused_prompt_default(const char* gcn_arch, bool integrated, bool windows) {
+    if (!integrated || windows) return false;
+    return igpu_prompt_defaults_arch(gcn_arch);
+}
+
 std::vector<std::pair<std::string, std::string>> igpu_default_env(const char* gcn_arch, bool integrated) {
     std::vector<std::pair<std::string, std::string>> t;
     if (!integrated || !igpu_prompt_defaults_arch(gcn_arch)) return t;
@@ -178,15 +199,17 @@ std::vector<std::pair<std::string, std::string>> igpu_default_env(const char* gc
             {"STRATA_PF_FUSED", "1"},
             {"STRATA_SELECT_WMMA", "1"},   // 0.2.9: the block scorer on matrix cores; not bitwise (about 10 of 2,051 selected cells flip at the cutoff
                                            // for queries past ~5K tokens), x1.008 at 8K, x1.037 at 32K, x1.077 at 64K (STRIX-Q-RESULTS.md)
-            // 0.2.9 (owner, 10-30: a consistent Strix Halo speed gain goes on by default): the prompt experts of every covered
-            // format on the F16 matrix-core kernels (the Q8_0 down layers of the Unsloth files included).  Windows gfx1151,
-            // interleaved x3, same 16 greedy ids: IQ3_S 4K 1,187 -> 1,296 and 8K 1,285 -> 1,399 tok/s (x1.09), UD-IQ4_XS 4K 1,119 ->
-            // 1,221 and 8K 1,180 -> 1,270; decode unchanged.  The rounding differs from the int8 kernels (KL is information only).
-            {"STRATA_PF_F16", "1"},
-            // Round 0215 (STRIX-FIT): the down rows of the F16 expert kernels go to the combine as FP16 (half the bytes written and read).  Windows gfx1151,
-            // interleaved 8K pairs, same engine: IQ3_S x1.022 (4 of 4 pairs), UD-IQ4_XS x1.026 (3 of 3), UD-Q4_K_XL x1.012 (3 of 4); the first-token KL
-            // is 1e-4 at 8K and 0.02-0.04 on agent transcripts (information).  STRATA_PF_DM16=0 turns it off.
+            // 0.2.19 (RDNA3 Wave-2): upgrade gfx1151 Windows prompt experts to native_h11p_kernel (STRATA_PF_F16=2, 128-tok FP16 WMMA),
+            // cover Q5_K/Q8_0 layers with STRATA_PF_P1A_L2=1, and enable Wave32 WMMA DFlash2 (2.78x) + rdna_gr/rdna_mmvq (HIP_FAST_DEC=1).
+            // Live Strix Halo IQ3_S: +7.5% decode (62.68 -> 67.41 tps), +2.9% pp4k, +1.7% pp8k, +7.6% short pp, KL 4.2e-11..7.6e-7, top1 EXACT.
+            {"STRATA_PF_F16", "2"},
+            // Round 0215 (STRIX-FIT): the down rows of the F16 expert kernels go to the combine as FP16 (half the bytes written and read).
             {"STRATA_PF_DM16", "1"},
+            // The Q4_K / Q5_K gate/up + Q5_1 / Q8_0 down layers (48 of 48 in UD-Q4_K_XL) on the F16 WMMA kernels of src/prefill/moe_p1a.cu.
+            {"STRATA_PF_P1A", "1"},
+            {"STRATA_PF_P1A_L2", "1"},
+            {"STRATA_DFLASH_WMMA", "1"},
+            {"STRATA_HIP_FAST_DEC", "1"},
         };
     }
     return t;
@@ -276,7 +299,7 @@ std::vector<std::pair<std::string, std::string>> launch_default_env(const char* 
     return t;
 }
 
-std::vector<std::string> apply_arch_defaults(const char* gcn_arch, bool integrated, int batch_slots) {
+std::vector<std::string> apply_arch_defaults(const char* gcn_arch, bool integrated, int batch_slots, bool mmq_built) {
     std::vector<std::string> set;
     // the community-made gfx1010 / gfx1030 changes (amd_community.hpp): one line, and only on those two cards
     if (const std::string note = strata::amd_community::startup_line(gcn_arch); !note.empty())
@@ -285,6 +308,54 @@ std::vector<std::string> apply_arch_defaults(const char* gcn_arch, bool integrat
         if (std::getenv(kv.first.c_str()) != nullptr) continue;   // the user's setting wins, whatever it is
         set_default(kv);
         set.push_back(kv.first);
+    }
+    {   // discrete RDNA3 (gfx1100 / gfx1101 / gfx1102, gfx11_extra.hpp); kept apart from the returned list like gfx12_extra.hpp
+#if defined(_WIN32)
+        const bool win11 = true;
+#else
+        const bool win11 = false;
+#endif
+        if (!integrated) {
+            std::vector<std::string> ex11;
+            for (const auto& kv : gfx11_discrete_exact_env(gcn_arch, win11)) {
+                if (std::getenv(kv.first.c_str()) != nullptr) continue;
+                set_default(kv);
+                ex11.push_back(kv.first);
+            }
+            if (!ex11.empty()) {
+                std::fprintf(stderr, "strata: gfx11 (RDNA3): %zu exact speed switches on by default (STRATA_GFX11_DEFAULTS=0 turns them off; a switch you set is kept): ",
+                             ex11.size());
+                for (size_t i = 0; i < ex11.size(); ++i) {
+                    const char* nm = std::strncmp(ex11[i].c_str(), "STRATA_", 7) == 0 ? ex11[i].c_str() + 7 : ex11[i].c_str();
+                    std::fprintf(stderr, "%s%s", i ? " " : "", nm);
+                }
+                std::fprintf(stderr, "\n");
+            }
+            std::vector<std::string> wm11;
+            for (const auto& kv : gfx11_discrete_wmma_env(gcn_arch)) {
+                if (std::getenv(kv.first.c_str()) != nullptr) continue;
+                set_default(kv);
+                wm11.push_back(kv.first);
+            }
+            if (!wm11.empty()) {
+                std::fprintf(stderr, "strata: gfx11 (RDNA3): %zu matrix-core prompt & MoE switches on by default (STRATA_GFX11_WMMA_DEFAULTS=0 or STRATA_GFX11_DEFAULTS=0 turns them off; NAME=0 turns one off): ",
+                             wm11.size());
+                for (size_t i = 0; i < wm11.size(); ++i) std::fprintf(stderr, "%s%s", i ? " " : "", wm11[i].c_str() + 7);
+                std::fprintf(stderr, "\n");
+            }
+            std::vector<std::string> par11;
+            for (const auto& kv : gfx11_discrete_parallel_env(gcn_arch, batch_slots)) {
+                if (std::getenv(kv.first.c_str()) != nullptr) continue;
+                set_default(kv);
+                par11.push_back(kv.first);
+            }
+            if (!par11.empty()) {
+                std::fprintf(stderr, "strata: gfx11 (RDNA3): exact parallel-request switches on for %d batch slots (STRATA_GFX11_DEFAULTS=0 turns them off; a switch you set is kept): ",
+                             batch_slots);
+                for (size_t i = 0; i < par11.size(); ++i) std::fprintf(stderr, "%s%s", i ? " " : "", par11[i].c_str() + 7);
+                std::fprintf(stderr, "\n");
+            }
+        }
     }
     {   // gfx12 extras kept apart from the table (gfx12_extra.hpp); not counted in the returned list
         std::vector<std::string> extra;
@@ -307,7 +378,10 @@ std::vector<std::string> apply_arch_defaults(const char* gcn_arch, bool integrat
             set_default(kv);
             if (kv.first == "STRATA_MMQ_KQ") kq = true; else any = true;
         }
-        if (kq)   // the engine says nothing more on a pack without K-quant experts: the variable is never read there
+        if (kq && !mmq_built)   // a build without MMQ: the 'prompt kernels' line (prefill.cpp mmq_plan) follows in every such build once a prompt runs
+            std::fprintf(stderr, "strata: gfx12 (RDNA4): a model with K-quant experts (Unsloth UD-Q4/Q5/Q6_K_XL) reads its prompt on Strata's own kernels; "
+                                 "the 'prompt kernels' line below gives the counts\n");
+        else if (kq)   // the engine says nothing more on a pack without K-quant experts: the variable is never read there
             std::fprintf(stderr, "strata: gfx12 (RDNA4): a model with K-quant experts (Unsloth UD-Q4/Q5/Q6_K_XL) reads its prompt on llama.cpp's MMQ kernels (+10..17%% prompt speed on an R9700, "
                                  "first-token KL against the FP16 path about 0.03; STRATA_MMQ_KQ=0 or STRATA_GFX12_DEFAULTS=0 turns it off)\n");
         const char* wm = std::getenv("STRATA_SELECT_WMMA");   // the line is only true while the scorer switch is not set to 0
@@ -352,6 +426,10 @@ std::vector<std::string> apply_arch_defaults(const char* gcn_arch, bool integrat
 #else
     const bool win_host = false;
 #endif
+    // Linux integrated gfx11 (gfx1103 / gfx1150 / gfx1151): the prompt experts on Strata's fused int8 kernels.  Silent: the prefill's own line
+    // ("prompt experts on the fused int8 kernels (STRATA_PF_FUSED=1 ...") is printed when the kernels are taken.  A value the user set is kept (=0 = MMQ).
+    if (igpu_fused_prompt_default(gcn_arch, integrated, win_host) && std::getenv("STRATA_PF_FUSED") == nullptr)
+        set_default({"STRATA_PF_FUSED", "1"});
     for (const auto& kv : parallel_default_env(gcn_arch, win_host, batch_slots)) {
         if (std::getenv(kv.first.c_str()) != nullptr) continue;
         set_default(kv);
@@ -373,6 +451,19 @@ std::vector<std::string> apply_arch_defaults(const char* gcn_arch, bool integrat
         std::fprintf(stderr, "strata: gfx1151 (Strix Halo): the verify window's graph is launched from a helper thread (the main thread serves the doorbells meanwhile; STRATA_GFX1151_DEFAULTS=0 or STRATA_VERIFY_ASYNC_LAUNCH=0 turns it off)\n");
         set.insert(set.end(), lau.begin(), lau.end());
     }
+#if defined(__linux__)
+    if (integrated) {
+        if (std::FILE* osf = std::fopen("/proc/sys/kernel/osrelease", "r")) {
+            char osrel[256] = {0};
+            if (std::fgets(osrel, sizeof(osrel), osf) && wsl2_ryzen_apu_unsupported(gcn_arch, integrated, osrel)) {
+                std::fprintf(stderr, "strata: WARNING: WSL2 on an integrated Ryzen APU (%s) is unsupported in ROCm 10.2 (#10097) "
+                                     "and may stall or reset KFD/dxgkrnl; run the native Windows HIP build instead\n",
+                             gcn_arch);
+            }
+            std::fclose(osf);
+        }
+    }
+#endif
     return set;
 }
 

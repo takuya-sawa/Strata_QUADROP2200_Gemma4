@@ -1,5 +1,6 @@
 #pragma once
 
+#include "strata/core/conversation_segment_pool.hpp"
 #include "strata/core/progress.hpp"
 
 #include <algorithm>
@@ -8,10 +9,27 @@
 #include <cstring>
 #include <initializer_list>
 #include <memory>
+#include <new>
 #include <utility>
 #include <vector>
 
 namespace strata::core {
+
+namespace conversation_buffer_detail {
+// Where a segment's bytes come from: the process-wide segment pool (STRATA_PARK_SEGPOOL_MIB, conversation_segment_pool.hpp)
+// when one is installed and has a free run for it, else ::operator new as always.  The pool decides by pointer on the way
+// back, so allocate and deallocate always agree.
+inline void* segment_alloc(size_t bytes) {
+    if (SegmentPool* pool = segment_pool())
+        if (void* p = pool->allocate(bytes)) return p;
+    return ::operator new(bytes);
+}
+inline void segment_free(void* p, size_t bytes) noexcept {
+    if (SegmentPool* pool = segment_pool())
+        if (pool->deallocate(p, bytes)) return;
+    ::operator delete(p);
+}
+}   // namespace conversation_buffer_detail
 
 // Snapshot-owned host storage. Appending never relocates existing payloads;
 // only the small segment directory can move. No sharing or copy-on-write is
@@ -40,6 +58,7 @@ public:
 
     size_t size() const { return size_; }
     bool empty() const { return size_ == 0; }
+    size_t segment_count() const { return segments_.size(); }
     size_t bytes() const {
         size_t n = segments_.capacity() * sizeof(Segment);
         for (const auto& segment : segments_) n += segment.capacity();
@@ -101,6 +120,13 @@ public:
     // writes every added byte before anything reads it (STRATA_PARK_ASYNC's background copy)
     void resize_for_overwrite(size_t n) { resize_impl(n, nullptr); }
 
+    // Allocation ranges include the spare capacity in the final segment.
+    template<class Fn> bool visit_allocations(Fn fn) const {
+        for (size_t i = 0; i < segments_.size(); ++i)
+            if (!fn(segments_[i].data(), segments_[i].capacity(), i)) return false;
+        return true;
+    }
+
     // fn(pointer, count, absolute_offset); false aborts a transfer immediately.
     template<class Fn> bool visit(size_t offset, size_t count, Fn fn) {
         return visit_impl(*this, offset, count, fn);
@@ -110,7 +136,7 @@ public:
     }
     bool read(void* target, size_t offset, size_t count) const {
         return visit(offset, count, [&](const uint8_t* p, size_t n, size_t at) {
-            std::memcpy(static_cast<uint8_t*>(target) + at - offset, p, n);
+            std::memcpy(static_cast<uint8_t*>(target) + (at - offset), p, n);
             return true;
         });
     }
@@ -135,6 +161,8 @@ private:
         template<class U> struct rebind { using other = DefaultInit<U>; };
         DefaultInit() = default;
         template<class U> DefaultInit(const DefaultInit<U>&) noexcept {}
+        T* allocate(size_t n) { return static_cast<T*>(conversation_buffer_detail::segment_alloc(n * sizeof(T))); }
+        void deallocate(T* p, size_t n) noexcept { conversation_buffer_detail::segment_free(p, n * sizeof(T)); }
         template<class U> void construct(U* p) { ::new ((void*) p) U; }
         template<class U, class... A> void construct(U* p, A&&... a) { ::new ((void*) p) U(std::forward<A>(a)...); }
     };
@@ -164,7 +192,7 @@ private:
             const size_t end = begin + segment.size();
             if (offset < end) {
                 const size_t n = std::min(count, end - offset);
-                if (!fn(segment.data() + offset - begin, n, offset)) return false;
+                if (!fn(segment.data() + (offset - begin), n, offset)) return false;
                 offset += n; count -= n;
             }
             begin = end;
@@ -174,5 +202,50 @@ private:
     std::vector<Segment> segments_;
     size_t size_ = 0;
 };
+
+// The caller has validated non-overlapping CPU ranges and grown `parked` to
+// max(active_bytes, parked_bytes).  No allocation or address change occurs.
+// `written` becomes true before the first destination byte is changed.
+inline bool conversation_buffer_exchange(ConversationBuffer& parked, uint8_t* active,
+                                         size_t active_bytes, size_t parked_bytes,
+                                         uint8_t* scratch, size_t block_bytes, bool& written) {
+    if (!scratch || !block_bytes || (!active && (active_bytes || parked_bytes)) ||
+        parked.size() < std::max(active_bytes, parked_bytes)) return false;
+    auto copy = [](void* dst, const void* src, size_t bytes) {
+        constexpr size_t step = size_t(1) << 20;
+        auto* d = static_cast<uint8_t*>(dst);
+        const auto* s = static_cast<const uint8_t*>(src);
+        for (size_t at = 0; at < bytes;) {
+            const size_t n = std::min(step, bytes - at);
+            std::memcpy(d + at, s + at, n);
+            at += n;
+            progress_beat();
+        }
+    };
+    const size_t common = std::min(active_bytes, parked_bytes);
+    for (size_t at = 0; at < common;) {
+        const size_t n = std::min(block_bytes, common - at);
+        copy(scratch, active + at, n);
+        if (!parked.visit(at, n, [&](uint8_t* p, size_t count, size_t pos) {
+                written = true;
+                copy(active + pos, p, count);
+                copy(p, scratch + (pos - at), count);
+                return true;
+            })) return false;
+        at += n;
+    }
+    const size_t end = std::max(active_bytes, parked_bytes);
+    for (size_t at = common; at < end;) {
+        const size_t n = std::min(block_bytes, end - at);
+        if (!parked.visit(at, n, [&](uint8_t* p, size_t count, size_t pos) {
+                written = true;
+                if (active_bytes > parked_bytes) copy(p, active + pos, count);
+                else copy(active + pos, p, count);
+                return true;
+            })) return false;
+        at += n;
+    }
+    return true;
+}
 
 } // namespace strata::core

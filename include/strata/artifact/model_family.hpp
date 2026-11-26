@@ -17,12 +17,16 @@ enum class ModelFamily {
     Qwen4Exp,    ///< Qwen3.8-Flash-Next and its fine-tunes / pruned variants (Swift 1.5, the Coder)
     Qwen35Moe,   ///< Qwen3.6-35B-A3B (Unsloth's MTP GGUFs): plain pre-norm residual, dense attention, nextn MTP block
     Gemma4,      ///< Gemma 4 (26B-A4B): its own engine path, src/gemma4 (CUDA/HIP builds)
+    Hy4Flash,     ///< Tencent Hy4-Flash 220B-A12B (LatentMoE + Hybrid MLA/IndexPool + 4-Module Engram + 5L DFly2)
+    Inkling2Loop, ///< Thinking Machines Inkling 2 Mini 26.4B-A3.4B/5.4B (24->48 Looped MoE + SITU + AttnRes + ShortConv + DSpark)
 };
 
 inline ModelFamily model_family_from_arch(const std::string& arch) {
     if (arch == "qwen4exp") return ModelFamily::Qwen4Exp;
     if (arch == "qwen35moe") return ModelFamily::Qwen35Moe;
     if (arch == "gemma4") return ModelFamily::Gemma4;
+    if (arch == "hy_v4_flash") return ModelFamily::Hy4Flash;
+    if (arch == "inkling2" || arch == "inkling2_loop" || arch == "inkling2_loop_text") return ModelFamily::Inkling2Loop;
     return ModelFamily::Unknown;
 }
 
@@ -35,6 +39,10 @@ inline const char* model_family_arch(ModelFamily f) {
         return "qwen35moe";
     case ModelFamily::Gemma4:
         return "gemma4";
+    case ModelFamily::Hy4Flash:
+        return "hy_v4_flash";
+    case ModelFamily::Inkling2Loop:
+        return "inkling2_loop";
     default:
         return "";
     }
@@ -49,6 +57,10 @@ inline const char* model_family_title(ModelFamily f) {
         return "Qwen3.6-35B-A3B";
     case ModelFamily::Gemma4:
         return "Gemma 4";
+    case ModelFamily::Hy4Flash:
+        return "Tencent Hy4-Flash";
+    case ModelFamily::Inkling2Loop:
+        return "Thinking Machines Inkling 2 Mini";
     default:
         return "an unknown model";
     }

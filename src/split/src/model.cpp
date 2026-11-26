@@ -2,6 +2,7 @@
 #include "card_check.hpp"
 #include "env.hpp"
 #include "expert_residency.hpp"
+#include "memlock.hpp"
 #include "rope_gguf.hpp"
 
 #include "store.hpp"
@@ -12,11 +13,19 @@
 
 #include <cuda_runtime.h>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <sys/stat.h>
+#else
 #include <sys/mman.h>
 #include <sys/stat.h>
 
 #include <fcntl.h>
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <cerrno>
@@ -39,6 +48,7 @@ void ck(cudaError_t e, const char* what) {
     if (e != cudaSuccess) throw std::runtime_error(std::string(what) + ": " + cudaGetErrorString(e));
 }
 
+#if !FNX_HOSTRING && !defined(_WIN32)
 // a card's PCI address in sysfs's spelling
 std::string card_bdf(int dev) {
     char bus[32];
@@ -89,6 +99,7 @@ void check_bar1(int dev, const std::string& bdf, const std::string& dir, const c
     if (bad) throw std::runtime_error("card " + std::to_string(dev) + ": cannot read " + path);
     require_bar1_covers(dev, bdf, prop.name, bar1_bytes(text, path), prop.totalGlobalMem, NCARD);
 }
+#endif
 // the Makefile passes the arch the kernels were compiled for (ARCH): a default here would let a card of another one
 // run them through the driver's PTX compiler unchecked
 #ifndef FNX_ARCH
@@ -198,43 +209,25 @@ const float* f32_data(const Tensor& t, size_t n) {
     return (const float*) t.data;
 }
 
-// a tensor's range of the mapping locked, LOCKERS threads each faulting in a part: one thread faults a cold file in
-// readahead-sized pieces (1.1 GB/s from the NVMe), 16 side by side reached 2.3 (tools/stage_test.cpp)
-void lock_in_ram(const Tensor& t) {
-    constexpr int LOCKERS = 16;
-    constexpr uintptr_t PG = 4096;
-    const uintptr_t a = (uintptr_t) t.data / PG * PG, e = (uintptr_t) t.data + t.nbytes;
-    const uintptr_t part = ((e - a) / LOCKERS + PG - 1) / PG * PG;
-    std::vector<int> err(LOCKERS, 0);
-    std::vector<std::thread> th;
-    for (int i = 0; i < LOCKERS; ++i)
-        th.emplace_back([&, i] {
-            const uintptr_t lo = std::min(e, a + (uintptr_t) i * part), hi = std::min(e, lo + part);
-            if (hi > lo && mlock((const void*) lo, hi - lo) != 0) {
-                err[(size_t) i] = errno;
-#if FNX_HIP
-                // HIP build: a user's RLIMIT_MEMLOCK is often 8 MiB and cannot be raised without root. The table then stays in the page
-                // cache unlocked (it is a file mapping: an evicted page is read again); the 16 threads still fault it in side by side
-                volatile unsigned char sink = 0;
-                for (uintptr_t p = lo; p < hi; p += PG) sink = sink + *(const volatile unsigned char*) p;
-                (void) sink;
-#endif
-            }
-        });
-    for (auto& x : th) x.join();
-#if FNX_HIP
-    for (int en : err)
-        if (en) {
-            std::fprintf(stderr, "fnx: mlock of %s (%zu MiB) failed: %s; the table stays unlocked in the page cache (raise RLIMIT_MEMLOCK to lock it)\n",
-                         t.name.c_str(), (size_t) (t.nbytes >> 20), std::strerror(en));
-            break;
-        }
-    return;
-#endif
-    for (int en : err)
-        if (en)
-            throw std::runtime_error("fnx: mlock of " + t.name + " (" + std::to_string(t.nbytes >> 20) + " MiB) failed: " + std::strerror(en) +
-                                     "; run with RLIMIT_MEMLOCK raised (systemd-run -p LimitMEMLOCK=infinity)");
+// The host-read tables locked in RAM as far as this machine lets the engine (memlock.hpp): the memory-lock limit raised as far as the hard limit allows, the free RAM
+// respected, the parts locked in the order given, the rest read into memory by the same 16 threads. Never a failed start because of the lock. Returns the one log
+// line (empty when everything is locked); it is printed here too.
+std::string lock_tables(const std::vector<const Tensor*>& ts) {
+    std::vector<LockPart> parts;
+    uint64_t want = 0;
+    for (const Tensor* t : ts) {
+        LockPart p;
+        p.name = t->name.c_str();
+        p.data = t->data;
+        p.nbytes = t->nbytes;
+        parts.push_back(p);
+        want += lock_page_ceil(t->nbytes) + kLockPage;
+    }
+    const LockEnv env = read_lock_env(want);
+    const LockOutcome out = lock_parts(parts, env);
+    const std::string line = lock_line(parts, out);
+    if (!line.empty()) std::fprintf(stderr, "%s\n", line.c_str());
+    return line;
 }
 
 // the stager's groups for load_card: group l every tensor of layer l, group NL the output head's. The head is read
@@ -908,16 +901,44 @@ struct MtpFiles {
     std::map<std::string, Tensor> t;
     void* base = nullptr;
     size_t size = 0;
+#ifdef _WIN32
+    void* hfile = nullptr;
+    void* hmap = nullptr;
+#endif
     std::vector<uint8_t> gate_b, up_b, down_b;   // the experts' blocks: [512][640][2560], [512][640][2560], [512][2560][640]
     uint32_t etype = T_Q4_0;
     Tensor gate, up, down;
     explicit MtpFiles(const std::string& dir) {
+#ifdef _WIN32
+        HANDLE hf = CreateFileA((dir + "/dense.bin").c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (hf == INVALID_HANDLE_VALUE) throw std::runtime_error("mtp: cannot open " + dir + "/dense.bin");
+        LARGE_INTEGER fsz{};
+        if (!GetFileSizeEx(hf, &fsz) || fsz.QuadPart <= 0) {
+            CloseHandle(hf);
+            throw std::runtime_error("mtp: cannot stat " + dir + "/dense.bin");
+        }
+        HANDLE hm = CreateFileMappingA(hf, nullptr, PAGE_READONLY, 0, 0, nullptr);
+        if (!hm) {
+            CloseHandle(hf);
+            throw std::runtime_error("mtp: cannot map dense.bin");
+        }
+        base = MapViewOfFile(hm, FILE_MAP_READ, 0, 0, 0);
+        if (!base) {
+            CloseHandle(hm);
+            CloseHandle(hf);
+            throw std::runtime_error("mtp: cannot map dense.bin");
+        }
+        hfile = (void*) hf;
+        hmap = (void*) hm;
+        size = (size_t) fsz.QuadPart;
+#else
         const int fd = ::open((dir + "/dense.bin").c_str(), O_RDONLY);
         if (fd < 0) throw std::runtime_error("mtp: cannot open " + dir + "/dense.bin");
         size = (size_t) lseek(fd, 0, SEEK_END);
         base = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
         ::close(fd);
         if (base == MAP_FAILED) throw std::runtime_error("mtp: cannot map dense.bin");
+#endif
         std::ifstream idx(dir + "/dense.txt");
         if (!idx) throw std::runtime_error("mtp: cannot open " + dir + "/dense.txt");
         std::string line;
@@ -951,7 +972,15 @@ struct MtpFiles {
         std::fprintf(stderr, "fnx: draft layer experts %s\n", ex.c_str());
         views();
     }
-    ~MtpFiles() { if (base) munmap(base, size); }
+    ~MtpFiles() {
+#ifdef _WIN32
+        if (base) UnmapViewOfFile(base);
+        if (hmap) CloseHandle((HANDLE) hmap);
+        if (hfile && hfile != INVALID_HANDLE_VALUE) CloseHandle((HANDLE) hfile);
+#else
+        if (base) munmap(base, size);
+#endif
+    }
     const Tensor& operator[](const std::string& n) const {
         const auto it = t.find(n);
         if (it == t.end()) throw std::runtime_error("mtp: " + n + " is missing");
@@ -1149,8 +1178,14 @@ Mtp::Mtp(const Model& m, const std::string& dir, const std::string& vocab_file) 
     {
         std::FILE* f = std::fopen(vocab_file.c_str(), "rb");
         if (!f) throw std::runtime_error("mtp: cannot open " + vocab_file);
+#ifdef _WIN32
+        struct _stat64 stb{};
+        const int st_ok = _fstat64(_fileno(f), &stb);
+#else
         struct stat stb{};
-        if (fstat(fileno(f), &stb) != 0 || stb.st_size % 4 != 0) {
+        const int st_ok = fstat(fileno(f), &stb);
+#endif
+        if (st_ok != 0 || stb.st_size % 4 != 0) {
             std::fclose(f);
             throw std::runtime_error("mtp: " + vocab_file + " is not whole int32 token ids (" + std::to_string((long long) stb.st_size) + " bytes)");
         }
@@ -1197,8 +1232,14 @@ Mtp::Mtp(const Model& m, const std::string& dir, const std::string& vocab_file) 
         const std::string vf = vocab_file.empty() ? dir + "/draft_vocab.bin" : vocab_file;
         std::FILE* f = std::fopen(vf.c_str(), "rb");
         if (!f) throw std::runtime_error("mtp: cannot open " + vf);
+#ifdef _WIN32
+        struct _stat64 stb{};
+        const int st_ok = _fstat64(_fileno(f), &stb);
+#else
         struct stat stb{};
-        if (fstat(fileno(f), &stb) != 0 || stb.st_size % 4 != 0) {
+        const int st_ok = fstat(fileno(f), &stb);
+#endif
+        if (st_ok != 0 || stb.st_size % 4 != 0) {
             std::fclose(f);
             throw std::runtime_error("mtp: " + vf + " is not whole int32 token ids (" + std::to_string((long long) stb.st_size) + " bytes)");
         }
@@ -1314,8 +1355,8 @@ Model::Model(const std::string& path, Load how, Store* store, const std::string*
         throw std::runtime_error("27b: output.weight is not [" + std::to_string(N) + "][" + std::to_string(vocab) + "] (token_embd's vocabulary)");
     {   // the host gathers its rows every window: a row read from the disk costs milliseconds, so keep it in RAM
         const auto t0 = std::chrono::steady_clock::now();
-        lock_in_ram(*tok_embd);
-        std::fprintf(stderr, "27b: %s (%.1f GB) locked in RAM in %.1f s\n", tok_embd->name.c_str(), tok_embd->nbytes / 1e9,
+        const bool all = lock_tables({tok_embd}).empty();
+        std::fprintf(stderr, "27b: %s (%.1f GB) %s in RAM in %.1f s\n", tok_embd->name.c_str(), tok_embd->nbytes / 1e9, all ? "locked" : "read",
                      std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
     }
 #else
@@ -1327,9 +1368,12 @@ Model::Model(const std::string& path, Load how, Store* store, const std::string*
     // the host gathers rows of these two every window: a row read from the disk costs milliseconds, so keep them in RAM
     {
         const auto t0 = std::chrono::steady_clock::now();
-        for (const Tensor* t : {tok_embd, ple_table}) lock_in_ram(*t);
-        std::fprintf(stderr, "fnx: %s and %s (%.1f GB) locked in RAM in %.1f s\n", tok_embd->name.c_str(), ple_table->name.c_str(),
-                     (tok_embd->nbytes + ple_table->nbytes) / 1e9, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+        // the PLE table first: the host reads about 24 scattered rows of it a token against one row of the token embedding, so when only part fits it is the part
+        // that matters (measured on 2x A6000: with the unlocked pages dropped, locking the token embedding alone left prompts at 160 tokens/s, 4K, against 2,996 locked)
+        const bool all = lock_tables({ple_table, tok_embd}).empty();
+        std::fprintf(stderr, "fnx: %s and %s (%.1f GB) %s in RAM in %.1f s\n", tok_embd->name.c_str(), ple_table->name.c_str(),
+                     (tok_embd->nbytes + ple_table->nbytes) / 1e9, all ? "locked" : "read",
+                     std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
     }
     for (int64_t v : g.ia(p + "ple.layer_multipliers")) ple_mult.push_back((uint64_t) v);
     for (int64_t v : g.ia(p + "ple.head_offsets")) ple_off.push_back((uint64_t) v);

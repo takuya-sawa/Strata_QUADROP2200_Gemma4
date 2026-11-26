@@ -11,9 +11,10 @@ import sys
 import numpy as np
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tools"))
-from gguf.quants import dequantize  # noqa: E402
-from gguf.constants import GGMLQuantizationType as Q  # noqa: E402
+sys.path.insert(0, str(ROOT.parent / "terminal" / "tools"))
+from _paths import gguf_lib  # noqa: E402
+_g = gguf_lib()
+dequantize, Q = _g.quants.dequantize, _g.GGMLQuantizationType
 
 ROWS, COLS = 16, 2560
 d = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".")
