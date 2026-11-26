@@ -241,6 +241,7 @@ OpenAI 互換なので、Claude Code・Codex CLI・OpenCode などからも使�
 
 ## 関連ガイド
 
+- [本家エンジンの取り込み](UPSTREAM_ENGINE.ja.md) — v0.2.22 のエンジンソースは Gemma 4 の実行経路とは別に保持
 - [OLDER_GPUS.md](OLDER_GPUS.md) — 古い NVIDIA/AMD カードの本家公式ガイド (sm_61・CUDA 12 エンジン)
 - [SOURCE_INSTALL.md](SOURCE_INSTALL.md) — ソースからのビルド
 - [TERMINAL_LAUNCH.md](TERMINAL_LAUNCH.md) — CLI とアプリ接続 (`strata connect`)
