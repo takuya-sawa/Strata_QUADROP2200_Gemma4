@@ -17,7 +17,7 @@ Strata 本家の使い方・対応環境は [README](../README.md) と [ガイ�
 | OS | Ubuntu 24.04.4 LTS・Linux 7.0.0-42-generic・x86_64 |
 | ドライバ | NVIDIA 580.178.04 (sm_61 をサポートする最後の系統。本家は [CUDA 12 エンジンの最適化](OLDER_GPUS.md) を参照) |
 | ツールチェーン | CUDA 12.2 (nvcc 12.2.140)・gcc-12 12.4.0・CMake 3.28.3・Python 3.12.3・GNU make (ninja 未導入) |
-| Strata | 0.1.59.1 (このツリーの `build-local-p2200/strata`)。本家のリリースは [v0.2.13](https://github.com/Niko1221/Strata/releases/latest) |
+| Strata | 0.1.69 (本家 v0.2.22 のエンジンを統合。このツリーの `build-local-p2200/strata`。統合前の 0.1.59 は `build-local-p2200/pre-merge-0.1.59/`)。本家のリリースは [v0.2.22](https://github.com/Niko1221/Strata/releases/latest) |
 
 モデル本体が **14.4 GB**、画像用の projector が **0.81 GB** で、VRAM は 5 GB、メモリは 16 GB です。
 モデル全体は VRAM に入りきらないため、エンジンは重みをメモリマップし、空き VRAM の範囲で attention・共有 FFN・KV cache などを GPU に配置します。ルーティングされたエキスパートは CPU 側で処理しますが、**全レイヤーの基本部分が GPU に載った場合に限り、さらに収まるエキスパートレイヤー全体を GPU に載せます**。そのため「VRAM内のエキスパート」が常に 0 とは限らず、実際の数は起動時に決まります。
